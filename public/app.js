@@ -149,6 +149,7 @@
   function metricRemainingPercent(metric) {
     const value = metric.remainingPercent ??
       (metric.usedPercent == null ? null : 100 - Number(metric.usedPercent));
+    if (value == null) return null;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : null;
   }
