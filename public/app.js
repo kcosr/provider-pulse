@@ -175,8 +175,8 @@
 
   function renderMetric(metric) {
     const percent = metricRemainingPercent(metric);
-    const severity = percent === null ? "" : percent <= 10 ? " critical" : percent <= 30 ? " low" : "";
-    const node = create("div", `metric${severity}`);
+    const band = percent === null ? "" : percent < 10 ? " critical" : percent < 25 ? " orange" : percent < 50 ? " yellow" : " green";
+    const node = create("div", `metric${band}`);
     const line = create("div", "metric-line");
     const label = metric.label || metric.name || metric.id || "Usage";
     line.append(create("span", "metric-name", label));
@@ -185,7 +185,7 @@
     node.append(line);
 
     if (percent !== null) {
-      const bar = create("div", `remaining-bar${severity}`);
+      const bar = create("div", `remaining-bar${band}`);
       bar.setAttribute("role", "progressbar");
       bar.setAttribute("aria-label", `${label} remaining`);
       bar.setAttribute("aria-valuemin", "0");

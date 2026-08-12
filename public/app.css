@@ -11,6 +11,8 @@
   --subtle: #66736d;
   --green: #69dba5;
   --green-bg: #15271f;
+  --yellow: #ddd06f;
+  --orange: #e79a58;
   --amber: #e8b464;
   --amber-bg: #2a2115;
   --red: #f17a70;
@@ -331,9 +333,12 @@ h1 {
   background: var(--green);
 }
 
-.metric.low .metric-value { color: var(--amber); }
+.metric.green .metric-value { color: var(--green); }
+.metric.yellow .metric-value { color: var(--yellow); }
+.metric.orange .metric-value { color: var(--orange); }
 .metric.critical .metric-value { color: var(--red); }
-.remaining-bar.low span { background: var(--amber); }
+.remaining-bar.yellow span { background: var(--yellow); }
+.remaining-bar.orange span { background: var(--orange); }
 .remaining-bar.critical { background: rgba(238, 111, 105, .16); }
 .remaining-bar.critical span { background: var(--red); }
 
