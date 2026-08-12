@@ -102,6 +102,17 @@ function standardResponse(method: unknown): unknown {
           rateLimitReachedType: null,
         },
         rateLimitsByLimitId: {
+          codex_bengalfox: {
+            limitId: "codex_bengalfox",
+            limitName: "GPT-5.3-Codex-Spark",
+            primary: { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_800_172_800 },
+            secondary: null,
+            credits: null,
+            individualLimit: null,
+            spendControlReached: null,
+            planType: "pro",
+            rateLimitReachedType: null,
+          },
           codex: {
             limitId: "codex",
             limitName: "Codex",
@@ -257,6 +268,15 @@ describe("probeCodexUsage", () => {
         remainingPercent: 0,
         reached: true,
       },
+      {
+        id: "codex_bengalfox:primary",
+        label: "GPT-5.3-Codex-Spark Primary",
+        usedPercent: 0,
+        remainingPercent: 100,
+        durationMinutes: 10_080,
+        resetsAt: "2027-01-17T08:00:00.000Z",
+        reached: false,
+      },
     ]);
     expect(result.balances).toEqual([
       {
@@ -288,7 +308,7 @@ describe("probeCodexUsage", () => {
       processFactory: () => fake.process,
     });
     expect(result.activity).toBeUndefined();
-    expect(result.windows).toHaveLength(3);
+    expect(result.windows).toHaveLength(4);
     expect(fake.killedWith).toEqual(["SIGTERM"]);
   });
 

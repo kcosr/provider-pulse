@@ -439,13 +439,21 @@ function normalizeIdentity(value: unknown): CodexObservedIdentity {
 function selectRateLimitSnapshots(limits: Record<string, unknown>): readonly (readonly [string, unknown])[] {
   if (limits.rateLimitsByLimitId !== null && limits.rateLimitsByLimitId !== undefined) {
     const byId = requireRecord(limits.rateLimitsByLimitId, "rateLimitsByLimitId");
-    const entries = Object.entries(byId);
+    const entries = Object.entries(byId).sort(([left], [right]) =>
+      rateLimitBucketRank(left) - rateLimitBucketRank(right) || left.localeCompare(right));
     if (entries.length > 0) return entries;
   }
   if (limits.rateLimits === null || limits.rateLimits === undefined) {
     throw parseError("Codex rate-limit response has no buckets.");
   }
   return [["codex", limits.rateLimits]];
+}
+
+function rateLimitBucketRank(id: string): number {
+  const normalized = id.toLowerCase();
+  if (normalized === "codex") return 0;
+  if (normalized.includes("spark") || normalized.includes("bengalfox")) return 2;
+  return 1;
 }
 
 function normalizeResetCredits(value: unknown): number | undefined {
