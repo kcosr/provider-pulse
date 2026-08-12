@@ -256,6 +256,16 @@ unknown and configured startup checks repopulate it. The small scheduler cursor
 prevents duplicate post-reset heartbeats across restarts; diagnostic JSONL is
 for troubleshooting only and is not replayed.
 
+## Releases and upgrades
+
+Provider Pulse uses semantic versions and publishes releases from annotated Git
+tags. The repository intentionally does not commit `dist/`; each checkout is
+built with its declared Node.js and npm dependencies.
+
+- See [CHANGELOG.md](CHANGELOG.md) for user-visible changes.
+- See [docs/releases.md](docs/releases.md) for the maintainer release checklist,
+  upgrade procedure, rollback procedure, and publication safety checks.
+
 ## Security notes
 
 - Keep configuration, credential homes, state, and logs readable only by the
@@ -267,3 +277,7 @@ for troubleshooting only and is not replayed.
 - Keep the HTTP listener on `127.0.0.1`.
 - A heartbeat is a real provider request. It can consume paid capacity, start a
   reset window, refresh a credential, and create a small provider-side session.
+
+## License
+
+Provider Pulse is available under the [MIT License](LICENSE).
