@@ -146,16 +146,16 @@
     return { ...(running || attempted || group[0]), inFlight: Boolean(running), health: running ? "running" : healthOf(attempted || group[0]) };
   }
 
-  function metricPercent(metric) {
-    const value = metric.usedPercent ?? metric.percentUsed ?? metric.percentage ?? metric.valuePercent ??
-      (metric.remainingPercent == null ? null : 100 - Number(metric.remainingPercent));
+  function metricRemainingPercent(metric) {
+    const value = metric.remainingPercent ??
+      (metric.usedPercent == null ? null : 100 - Number(metric.usedPercent));
     const parsed = Number(value);
     return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : null;
   }
 
   function metricValue(metric) {
-    const percent = metricPercent(metric);
-    if (percent !== null) return `${Math.round(percent)}%`;
+    const percent = metricRemainingPercent(metric);
+    if (percent !== null) return `${Math.round(percent)}% left`;
     if (metric.formattedValue != null) return String(metric.formattedValue);
     if (metric.remaining != null) return String(metric.remaining);
     if (metric.value != null) return String(metric.value);
@@ -174,7 +174,9 @@
   }
 
   function renderMetric(metric) {
-    const node = create("div", "metric");
+    const percent = metricRemainingPercent(metric);
+    const severity = percent === null ? "" : percent <= 10 ? " critical" : percent <= 30 ? " low" : "";
+    const node = create("div", `metric${severity}`);
     const line = create("div", "metric-line");
     const label = metric.label || metric.name || metric.id || "Usage";
     line.append(create("span", "metric-name", label));
@@ -182,15 +184,14 @@
     line.append(create("span", "metric-value", metricValue(metric)));
     node.append(line);
 
-    const percent = metricPercent(metric);
     if (percent !== null) {
-      const bar = create("div", `usage-bar${percent >= 90 ? " high" : percent >= 70 ? " medium" : ""}`);
+      const bar = create("div", `remaining-bar${severity}`);
       bar.setAttribute("role", "progressbar");
-      bar.setAttribute("aria-label", `${label} used`);
+      bar.setAttribute("aria-label", `${label} remaining`);
       bar.setAttribute("aria-valuemin", "0");
       bar.setAttribute("aria-valuemax", "100");
       bar.setAttribute("aria-valuenow", String(percent));
-      bar.style.setProperty("--usage", `${percent}%`);
+      bar.style.setProperty("--remaining", `${percent}%`);
       bar.append(create("span"));
       node.append(bar);
     }

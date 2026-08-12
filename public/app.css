@@ -315,7 +315,7 @@ h1 {
   letter-spacing: -.02em;
 }
 
-.usage-bar {
+.remaining-bar {
   height: 4px;
   margin-top: 6px;
   overflow: hidden;
@@ -323,16 +323,19 @@ h1 {
   background: #222a26;
 }
 
-.usage-bar span {
+.remaining-bar span {
   display: block;
-  width: var(--usage);
+  width: var(--remaining);
   height: 100%;
   border-radius: inherit;
   background: var(--green);
 }
 
-.usage-bar.medium span { background: var(--amber); }
-.usage-bar.high span { background: var(--red); }
+.metric.low .metric-value { color: var(--amber); }
+.metric.critical .metric-value { color: var(--red); }
+.remaining-bar.low span { background: var(--amber); }
+.remaining-bar.critical { background: rgba(238, 111, 105, .16); }
+.remaining-bar.critical span { background: var(--red); }
 
 .empty-metrics {
   display: grid;
