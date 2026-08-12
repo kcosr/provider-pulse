@@ -71,10 +71,17 @@ describe("HTTP API", () => {
     });
     expect(page.statusCode).toBe(200);
     expect(page.headers["content-type"]).toContain("text/html");
+    expect(page.headers["cache-control"]).toBe("no-store");
     expect(page.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
     expect(page.headers["x-frame-options"]).toBe("DENY");
     expect(page.headers["x-content-type-options"]).toBe("nosniff");
     expect(page.headers["referrer-policy"]).toBe("no-referrer");
+    const script = await server.inject({
+      method: "GET",
+      url: "/app.js",
+      headers: { host: "127.0.0.1:4317" },
+    });
+    expect(script.headers["cache-control"]).toBe("no-store");
     await application.close();
   });
 

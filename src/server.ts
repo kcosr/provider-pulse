@@ -92,9 +92,9 @@ export async function buildServer(
     return reply.code(202).send({ receipts: application.heartbeatAll() });
   });
 
-  server.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(index));
-  server.get("/app.css", async (_request, reply) => reply.type("text/css; charset=utf-8").send(stylesheet));
-  server.get("/app.js", async (_request, reply) => reply.type("text/javascript; charset=utf-8").send(script));
+  server.get("/", async (_request, reply) => reply.header("cache-control", "no-store").type("text/html; charset=utf-8").send(index));
+  server.get("/app.css", async (_request, reply) => reply.header("cache-control", "no-store").type("text/css; charset=utf-8").send(stylesheet));
+  server.get("/app.js", async (_request, reply) => reply.header("cache-control", "no-store").type("text/javascript; charset=utf-8").send(script));
 
   return server;
 }

@@ -283,13 +283,12 @@
       const job = group.find((candidate) => candidate.enabled) || group[0];
       const running = group.some((candidate) => state.pendingHeartbeats.has(candidate.id) || candidate.inFlight || healthOf(candidate) === "running");
       const blocked = group.every((candidate) => candidate.enabled === false) || identity.match === false;
-      const tuple = [job.executor, job.provider, job.model, job.reasoning].filter(Boolean).join(" · ");
       actions.append(button(
         running ? "Running…" : "Heartbeat",
         "action-button heartbeat",
         () => runAction(`/api/heartbeats/${encodeURIComponent(job.id)}/run`, `Running ${job.label || "heartbeat"}`, state.pendingHeartbeats, job.id),
         running || blocked || hasHeartbeatRunning,
-        blocked ? identity.match === false ? "Blocked by identity mismatch" : "Heartbeat disabled" : tuple,
+        blocked ? identity.match === false ? "Blocked by identity mismatch" : "Heartbeat disabled" : undefined,
       ));
     });
     footer.append(actions);
