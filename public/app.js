@@ -3,6 +3,8 @@
 
   const POLL_INTERVAL_MS = 60_000;
   const ACTION_REFRESH_MS = 800;
+  const WEEK_DURATION_MINUTES = 7 * 24 * 60;
+  const DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
   const state = {
     status: null,
     fetching: false,
@@ -206,6 +208,52 @@
     }).format(new Date(value));
   }
 
+  function weeklyTimeProgress(metric) {
+    if (Number(metric.durationMinutes) !== WEEK_DURATION_MINUTES) return null;
+    const resetAt = dateValue(metric.resetsAt);
+    if (resetAt === null) return null;
+    const durationMilliseconds = WEEK_DURATION_MINUTES * 60_000;
+    const elapsedMilliseconds = Math.max(
+      0,
+      Math.min(durationMilliseconds, durationMilliseconds - (resetAt.getTime() - Date.now())),
+    );
+    return {
+      elapsedDays: elapsedMilliseconds / DAY_MILLISECONDS,
+      resetAt,
+    };
+  }
+
+  function renderWeeklyTimeProgress(metric, label) {
+    const progress = weeklyTimeProgress(metric);
+    if (progress === null) return null;
+    const wrapper = create("div", "week-progress");
+    const completedDays = Math.min(7, Math.floor(progress.elapsedDays));
+    const copy = create("div", "week-progress-copy");
+    copy.append(
+      create("span", "week-progress-label", "7-day progress"),
+      create("span", "week-progress-value", `${completedDays}d elapsed`),
+    );
+    const cells = create("div", "week-progress-cells");
+    cells.setAttribute("role", "progressbar");
+    cells.setAttribute("aria-label", `${label} time elapsed`);
+    cells.setAttribute("aria-valuemin", "0");
+    cells.setAttribute("aria-valuemax", "7");
+    cells.setAttribute("aria-valuenow", String(progress.elapsedDays));
+    cells.setAttribute(
+      "aria-valuetext",
+      `${formatPercentagePoints(progress.elapsedDays)} of 7 days elapsed; ${resetText(progress.resetAt)}`,
+    );
+    for (let index = 0; index < 7; index += 1) {
+      const fill = Math.max(0, Math.min(1, progress.elapsedDays - index));
+      const cell = create("span", `week-progress-cell${fill === 1 ? " complete" : fill > 0 ? " current" : ""}`);
+      cell.style.setProperty("--day-progress", `${fill * 100}%`);
+      cell.setAttribute("aria-hidden", "true");
+      cells.append(cell);
+    }
+    wrapper.append(copy, cells);
+    return wrapper;
+  }
+
   function renderMetric(accountId, metric) {
     const percent = metricRemainingPercent(metric);
     const comparison = metricComparison(accountId, metric, percent);
@@ -242,6 +290,8 @@
       }
       node.append(bar);
     }
+    const weeklyProgress = renderWeeklyTimeProgress(metric, label);
+    if (weeklyProgress !== null) node.append(weeklyProgress);
     return node;
   }
 

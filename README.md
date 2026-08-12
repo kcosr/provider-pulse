@@ -12,6 +12,7 @@ and quota polling. See [the Fireworks integration notes](docs/fireworks-follow-u
 
 - Shows every configured account under an operator-chosen label.
 - Reports all provider usage windows it can observe, including reset times.
+- Shows seven-day quota windows as seven elapsed-time cells alongside capacity.
 - Compares an optional expected email with the identity observed by the CLI.
 - Records the current usage-poll and heartbeat health in memory.
 - Runs per-account or bulk usage checks from the web page.
@@ -227,6 +228,11 @@ The web page exposes the same per-card and bulk actions. Heartbeats deliberately
 have no confirmation modal, so treat the buttons as real quota-consuming
 actions. Failed or timed-out heartbeats are not automatically retried because
 the provider may have accepted a request whose response was lost.
+
+Each normalized seven-day quota window also shows a seven-cell time-progress
+bar. Completed 24-hour slices are filled, the current slice is partially filled,
+and future slices remain empty. This is calculated from the provider-reported
+reset and duration and does not require more polling or persisted history.
 
 ## How terminal usage polling works
 

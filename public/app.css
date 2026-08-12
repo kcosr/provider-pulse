@@ -366,6 +366,47 @@ h1 {
 .remaining-bar.critical { background: rgba(238, 111, 105, .16); }
 .remaining-bar.critical .remaining-bar-current { background: var(--red); }
 
+.week-progress {
+  margin-top: 8px;
+}
+
+.week-progress-copy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--subtle);
+  font-size: 9px;
+}
+
+.week-progress-label { font-weight: 680; }
+
+.week-progress-cells {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.week-progress-cell {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid #303a35;
+  border-radius: 3px;
+  background: #171d1a;
+}
+
+.week-progress-cell::before {
+  content: "";
+  display: block;
+  width: var(--day-progress);
+  height: 100%;
+  background: #788a82;
+}
+
+.week-progress-cell.complete::before { background: #8d9e96; }
+.week-progress-cell.current::before { background: #6e8279; }
+
 .empty-metrics {
   display: grid;
   min-height: 63px;

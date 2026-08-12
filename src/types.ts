@@ -158,6 +158,7 @@ export interface UsageWindow {
   label: string;
   usedPercent?: number;
   remainingPercent?: number;
+  durationMinutes?: number;
   resetsAt?: string;
   reached?: boolean;
 }

@@ -1093,6 +1093,7 @@ function normalizeParsedWindow(window: {
   label: string;
   usedPercent?: number;
   remainingPercent?: number;
+  durationMinutes?: number;
   resetsAt?: string | null;
   reached?: boolean;
 }): UsageWindow {
@@ -1101,6 +1102,7 @@ function normalizeParsedWindow(window: {
     label: window.label,
     ...(window.usedPercent === undefined ? {} : { usedPercent: window.usedPercent }),
     ...(window.remainingPercent === undefined ? {} : { remainingPercent: window.remainingPercent }),
+    ...(window.durationMinutes === undefined ? {} : { durationMinutes: window.durationMinutes }),
     ...(window.resetsAt === undefined || window.resetsAt === null ? {} : { resetsAt: window.resetsAt }),
     ...(window.reached === undefined ? {} : { reached: window.reached }),
   };

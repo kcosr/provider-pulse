@@ -17,11 +17,11 @@ describe("Claude usage parser", () => {
     const output = await readFile(fixtureUrl("claude-usage-v1.txt"), "utf8");
     const windows = parseClaudeUsage(output, new Date("2026-08-11T12:00:00Z"));
 
-    expect(windows.map(({ id, usedPercent, remainingPercent }) => ({ id, usedPercent, remainingPercent }))).toEqual([
-      { id: "session", usedPercent: 24, remainingPercent: 76 },
-      { id: "weekly", usedPercent: 61, remainingPercent: 39 },
-      { id: "fable-5-weekly", usedPercent: 7, remainingPercent: 93 },
-      { id: "sonnet-weekly", usedPercent: 12, remainingPercent: 88 },
+    expect(windows.map(({ id, usedPercent, remainingPercent, durationMinutes }) => ({ id, usedPercent, remainingPercent, durationMinutes }))).toEqual([
+      { id: "session", usedPercent: 24, remainingPercent: 76, durationMinutes: 300 },
+      { id: "weekly", usedPercent: 61, remainingPercent: 39, durationMinutes: 10_080 },
+      { id: "fable-5-weekly", usedPercent: 7, remainingPercent: 93, durationMinutes: 10_080 },
+      { id: "sonnet-weekly", usedPercent: 12, remainingPercent: 88, durationMinutes: 10_080 },
     ]);
     expect(windows.every((window) => window.resetsAt !== null)).toBe(true);
   });
@@ -62,6 +62,7 @@ Current week (all models)
         label: "Current session",
         usedPercent: 6,
         remainingPercent: 94,
+        durationMinutes: 300,
         resetsAt: "2026-08-12T06:20:00.000Z",
       },
       {
@@ -69,6 +70,7 @@ Current week (all models)
         label: "Current week (all models)",
         usedPercent: 10,
         remainingPercent: 90,
+        durationMinutes: 10080,
         resetsAt: "2026-08-17T09:00:00.000Z",
       },
       {
@@ -76,6 +78,7 @@ Current week (all models)
         label: "Current week (Fable)",
         usedPercent: 19,
         remainingPercent: 81,
+        durationMinutes: 10080,
         resetsAt: "2026-08-17T09:00:00.000Z",
       },
     ]);

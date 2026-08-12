@@ -16,6 +16,7 @@ export interface ParsedUsageWindow {
   readonly label: string;
   readonly usedPercent: number;
   readonly remainingPercent: number;
+  readonly durationMinutes: number;
   readonly resetsAt: string | null;
 }
 
@@ -168,6 +169,7 @@ export function parseClaudeUsageCache(json: string): readonly ParsedUsageWindow[
       ...heading,
       usedPercent,
       remainingPercent: clampPercent(100 - usedPercent),
+      durationMinutes: claudeWindowDurationMinutes(heading.id),
       resetsAt: safeTimestamp(entry["resets_at"]),
     });
   }
@@ -186,6 +188,10 @@ export function mergeClaudeUsageWindows(
   const terminalIds = new Set(terminalWindows.map((window) => window.id));
   merged.push(...cachedWindows.filter((window) => !terminalIds.has(window.id)));
   return merged;
+}
+
+function claudeWindowDurationMinutes(id: string): number {
+  return id === "session" ? 5 * 60 : 7 * 24 * 60;
 }
 
 async function readClaudeUsageCache(home: string): Promise<readonly ParsedUsageWindow[]> {
@@ -255,6 +261,7 @@ export function parseClaudeUsage(output: string, now = new Date()): readonly Par
       label: heading.label,
       usedPercent: used,
       remainingPercent: clampPercent(100 - used),
+      durationMinutes: claudeWindowDurationMinutes(heading.id),
       resetsAt: resetDescription === null ? null : parseResetTime(resetDescription, now),
     });
   }

@@ -163,6 +163,7 @@ export function parseGrokUsage(output: string, now = new Date()): readonly Parse
     label: "Weekly limit",
     usedPercent: used,
     remainingPercent: clampPercent(100 - used),
+    durationMinutes: 7 * 24 * 60,
     resetsAt: resetDescription === null ? null : parseResetTime(resetDescription, now),
   }];
 }

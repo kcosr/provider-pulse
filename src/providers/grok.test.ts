@@ -16,6 +16,7 @@ describe("Grok usage parser", () => {
       label: "Weekly limit",
       usedPercent: 42,
       remainingPercent: 58,
+      durationMinutes: 10_080,
     });
     expect(windows[0]?.resetsAt).not.toBeNull();
   });
@@ -30,6 +31,7 @@ describe("Grok usage parser", () => {
         label: "Weekly limit",
         usedPercent: 28,
         remainingPercent: 72,
+        durationMinutes: 10_080,
         resetsAt: expect.stringMatching(/^2026-08-13T/),
       },
     ]);
