@@ -10,7 +10,7 @@ import {
   validateRuntimeDependencies,
   type UsageProbeResult,
 } from "./application.js";
-import type { AppConfig } from "./types.js";
+import type { AppConfig, UsageWindow } from "./types.js";
 
 describe("ProviderPulseApplication", () => {
   it("coalesces account checks and keeps status reads side-effect free", async () => {
@@ -90,6 +90,37 @@ describe("ProviderPulseApplication", () => {
     await app.close();
   });
 
+  it("reports a configured reset window that a successful usage poll cannot produce", async () => {
+    const config = await testConfig(true);
+    delete config.accounts[0]!.expectedIdentity;
+    let windows: UsageWindow[] = [];
+    const app = new ProviderPulseApplication(config, {
+      usageProbe: async () => successfulUsage(undefined, windows),
+    });
+
+    await app.initialize();
+    await vi.waitFor(() => expect(app.getStatus().heartbeats[0]?.health).toBe("unhealthy"));
+    const missingWindow = app.getStatus().heartbeats[0];
+    expect(missingWindow).not.toHaveProperty("nextEligibleAt");
+    expect(missingWindow).toMatchObject({
+      error: {
+        code: "heartbeat_reset_window_unavailable",
+        message: "Usage adapter did not report configured reset window weekly",
+      },
+    });
+
+    windows = [{
+      id: "weekly",
+      label: "Weekly",
+      resetsAt: "2026-08-20T12:00:00.000Z",
+    }];
+    app.checkUsage("codex-one");
+    await vi.waitFor(() => expect(app.getStatus().heartbeats[0]?.nextEligibleAt).toBe("2026-08-20T12:02:00.000Z"));
+    expect(app.getStatus().heartbeats[0]).toMatchObject({ health: "unknown" });
+    expect(app.getStatus().heartbeats[0]).not.toHaveProperty("error");
+    await app.close();
+  });
+
   it("serializes usage and heartbeat work on the same credential surface", async () => {
     const config = await testConfig(true);
     delete config.accounts[0]!.expectedIdentity;
@@ -110,7 +141,8 @@ describe("ProviderPulseApplication", () => {
     firstProbe.resolve(successfulUsage());
     await vi.waitFor(() => expect(heartbeatRunner).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(usageProbe).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(app.getStatus().heartbeats[0]?.health).toBe("healthy"));
+    await vi.waitFor(() => expect(app.getStatus().heartbeats[0]?.lastSuccessAt).toBeDefined());
+    await vi.waitFor(() => expect(app.getStatus().heartbeats[0]?.inFlight).toBe(false));
     await app.close();
   });
 
@@ -323,10 +355,10 @@ async function testConfig(withHeartbeat = false): Promise<AppConfig> {
   };
 }
 
-function successfulUsage(email?: string): UsageProbeResult {
+function successfulUsage(email?: string, windows: UsageWindow[] = []): UsageProbeResult {
   return {
     identity: email === undefined ? {} : { email },
-    snapshot: { observedAt: new Date().toISOString(), windows: [], balances: [] },
+    snapshot: { observedAt: new Date().toISOString(), windows, balances: [] },
     implementation: "fake",
     implementationVersion: "1",
   };

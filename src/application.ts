@@ -630,11 +630,40 @@ export class ProviderPulseApplication {
   ): Promise<void> {
     for (const job of this.#jobs.values()) {
       if (!job.enabled || job.accountId !== accountId) continue;
-      const resetAt = windows.find((window) => window.id === job.trigger.windowId)?.resetsAt;
-      if (resetAt === undefined) continue;
+      const window = windows.find((candidate) => candidate.id === job.trigger.windowId);
+      const resetAt = window?.resetsAt;
+      if (resetAt === undefined) {
+        const code = window === undefined
+          ? "heartbeat_reset_window_unavailable"
+          : "heartbeat_reset_time_unavailable";
+        const message = window === undefined
+          ? `Usage adapter did not report configured reset window ${job.trigger.windowId}`
+          : `Usage adapter did not report a reset time for window ${job.trigger.windowId}`;
+        this.#store.updateHeartbeat(job.id, (current) => {
+          const { nextEligibleAt: _nextEligibleAt, ...withoutNextEligibleAt } = current;
+          if (current.error !== undefined && !isResetObservationError(current.error)) {
+            return withoutNextEligibleAt;
+          }
+          return {
+            ...withoutNextEligibleAt,
+            health: "unhealthy",
+            error: { code, message },
+          };
+        });
+        continue;
+      }
       await this.#scheduler.observeReset(job.id, resetAt, { markFreshObservation });
       this.#store.updateHeartbeat(job.id, (current) => ({
-        ...current,
+        ...(isResetObservationError(current.error)
+          ? {
+              ...withoutError(current),
+              health: current.inFlight
+                ? "running" as const
+                : current.lastSuccessAt === undefined
+                  ? "unknown" as const
+                  : "healthy" as const,
+            }
+          : current),
         nextEligibleAt: calculateResetEligibleAt(resetAt, job.trigger.offsetMinutes).toISOString(),
       }));
     }
@@ -895,6 +924,11 @@ function normalizeError(error: unknown, fallbackCode: string): StatusError {
 
 function identityMismatchError(): StatusError {
   return { code: "identity_mismatch", message: "Observed provider identity does not match the configured identity" };
+}
+
+function isResetObservationError(error: StatusError | undefined): boolean {
+  return error?.code === "heartbeat_reset_window_unavailable" ||
+    error?.code === "heartbeat_reset_time_unavailable";
 }
 
 function receipt(

@@ -5,9 +5,9 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/worktrees/provider-pulse
+WorkingDirectory=%h/.local/share/provider-pulse/app
 Environment=PROVIDER_PULSE_CONFIG=%h/.config/provider-pulse/config.json
-ExecStart=/usr/bin/env node %h/worktrees/provider-pulse/dist/main.js
+ExecStart=/usr/bin/env node %h/.local/share/provider-pulse/app/dist/main.js
 Restart=on-failure
 RestartSec=5s
 # Heartbeats may have a configured timeout of up to 900 seconds. Leave enough

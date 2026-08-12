@@ -44,6 +44,9 @@ estimating it.
 ## Install and verify
 
 ```sh
+git clone https://github.com/kcosr/provider-pulse.git \
+  "$HOME/.local/share/provider-pulse/app"
+cd "$HOME/.local/share/provider-pulse/app"
 npm ci --ignore-scripts
 npm run typecheck
 npm test
@@ -160,6 +163,19 @@ is manual-first. A reset-aware heartbeat selects a normalized usage window and
 runs once after the observed reset plus its configured offset. The internal
 minute timer only compares timestamps; it makes no provider request.
 
+Reset-aware `windowId` values come from the normalized status API:
+
+- Claude: `session`, `weekly`, and `<model>-weekly` such as
+  `fable-5-weekly`;
+- Grok: `weekly`;
+- Codex: `<limit-id>:primary` or `<limit-id>:secondary`, using the exact IDs
+  returned for that account by `GET /api/status`.
+
+Provider window availability can vary by account and plan. After every
+successful usage check, an enabled heartbeat whose configured window or reset
+time is absent becomes unhealthy with an explicit error instead of remaining
+silently unscheduled.
+
 ## Run locally
 
 ```sh
@@ -225,8 +241,9 @@ though it sends no model prompt; that is a current CLI limitation.
 
 ## Run as a user service
 
-Review [the service example](deploy/provider-pulse.service.example), especially
-its checkout path, then install and start it:
+The service example expects the recommended checkout path from the install
+steps above. If the repository is elsewhere, edit `WorkingDirectory` and
+`ExecStart` first. Then install and start it:
 
 ```sh
 install -D -m 0644 deploy/provider-pulse.service.example \

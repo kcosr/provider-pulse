@@ -85,7 +85,32 @@ describe("tmux terminal probe", () => {
     expect(start?.env).not.toHaveProperty("XAI_API_KEY");
     const sendRequests = runner.requests.filter((request) => request.args[4] === "send-keys");
     expect(sendRequests.map((request) => request.args.slice(-2))).toEqual([["-l", "/usage"], [expect.any(String), "Enter"]]);
+    const captureRequests = runner.requests.filter((request) => request.args[4] === "capture-pane");
+    expect(captureRequests.every((request) => request.maxOutputBytes === 1_024)).toBe(true);
+    expect(start?.maxOutputBytes).toBe(32 * 1_024);
     expect(runner.requests.at(-1)?.args.slice(4, 6)).toEqual(["kill-session", "-t"]);
+  });
+
+  it("normalizes a capture output-limit failure to the terminal probe error contract", async () => {
+    const runner: CommandRunner = {
+      async run(request) {
+        if (request.args[4] === "capture-pane") {
+          throw Object.assign(new Error("runner output limit"), { code: "process_output_limit" });
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+    };
+    const probe = new TmuxTerminalProbe(runner, {
+      ownerToken: "owner_token_1234",
+      createId: () => "12345678-abcd-4321-abcd-123456789012",
+    });
+
+    await expect(probe.probe(spec())).rejects.toEqual(
+      new TerminalProbeError(
+        "terminal_probe_output_too_large",
+        "provider terminal output exceeded its limit",
+      ),
+    );
   });
 
   it("kills the exact session after timeout", async () => {

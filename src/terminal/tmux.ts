@@ -244,7 +244,25 @@ export class TmuxTerminalProbe implements TerminalProbe {
     let stable = 0;
 
     while (this.#now() <= phaseDeadline && this.#now() <= totalDeadline) {
-      const captured = await this.#tmux(["capture-pane", "-p", "-t", sessionName, "-S", "-"]);
+      let captured: CommandResult;
+      try {
+        captured = await this.#tmux(
+          ["capture-pane", "-p", "-t", sessionName, "-S", "-"],
+          spec.maxOutputBytes,
+        );
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "process_output_limit"
+        ) {
+          throw new TerminalProbeError(
+            "terminal_probe_output_too_large",
+            "provider terminal output exceeded its limit",
+          );
+        }
+        throw error;
+      }
       if (captured.exitCode !== 0) {
         throw new TerminalProbeError(
           "terminal_probe_capture_failed",
@@ -303,14 +321,17 @@ export class TmuxTerminalProbe implements TerminalProbe {
     }
   }
 
-  #tmux(args: readonly string[]): Promise<CommandResult> {
+  #tmux(
+    args: readonly string[],
+    maxOutputBytes = TMUX_COMMAND_OUTPUT_LIMIT,
+  ): Promise<CommandResult> {
     return this.#runner.run({
       executable: this.#tmuxExecutable,
       args: ["-L", this.#serverName, "-f", "/dev/null", ...args],
       env: isolatedProcessEnvironment(),
       clearEnvironment: true,
       timeoutMs: TMUX_COMMAND_TIMEOUT_MS,
-      maxOutputBytes: TMUX_COMMAND_OUTPUT_LIMIT,
+      maxOutputBytes,
     });
   }
 
