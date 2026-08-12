@@ -3,10 +3,12 @@
 
   const POLL_INTERVAL_MS = 60_000;
   const ACTION_REFRESH_MS = 800;
+  const METRIC_BASELINE_STORAGE_KEY = "provider-pulse.metric-baselines.v1";
+  const METRIC_BASELINE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
   const state = {
     status: null,
     fetching: false,
-    metricBaselines: new Map(),
+    metricBaselines: loadMetricBaselines(),
     pendingAccounts: new Set(),
     pendingHeartbeats: new Set(),
     pendingBulk: new Set(),
@@ -176,22 +178,90 @@
     return "Unavailable";
   }
 
+  function loadMetricBaselines() {
+    const baselines = new Map();
+    try {
+      const stored = window.localStorage.getItem(METRIC_BASELINE_STORAGE_KEY);
+      if (stored === null) return baselines;
+      const payload = JSON.parse(stored);
+      if (payload?.version !== 1 || !Array.isArray(payload.baselines)) return baselines;
+      const now = Date.now();
+      payload.baselines.forEach((record) => {
+        if (
+          typeof record?.key !== "string" ||
+          !Number.isFinite(record.remainingPercent) ||
+          record.remainingPercent < 0 ||
+          record.remainingPercent > 100 ||
+          !Number.isFinite(record.capturedAt) ||
+          record.capturedAt > now ||
+          now - record.capturedAt > METRIC_BASELINE_MAX_AGE_MS ||
+          (record.resetAt !== null && typeof record.resetAt !== "string")
+        ) return;
+        baselines.set(record.key, {
+          remainingPercent: record.remainingPercent,
+          resetAt: record.resetAt,
+          capturedAt: record.capturedAt,
+        });
+      });
+    } catch (_) {
+      // Storage can be unavailable or contain invalid data. The dashboard
+      // remains usable with page-memory baselines in either case.
+    }
+    return baselines;
+  }
+
+  function persistMetricBaselines() {
+    try {
+      window.localStorage.setItem(METRIC_BASELINE_STORAGE_KEY, JSON.stringify({
+        version: 1,
+        baselines: [...state.metricBaselines].map(([key, record]) => ({ key, ...record })),
+      }));
+    } catch (_) {
+      // Quota and privacy restrictions should not affect status rendering.
+    }
+  }
+
   function metricComparison(accountId, metric, currentPercent) {
     if (currentPercent === null) return null;
     const kind = metric.isBalance ? "balance" : "window";
     const key = `${accountId}\u0000${kind}\u0000${metric.id}`;
-    const baseline = state.metricBaselines.get(key);
-    if (baseline === undefined || currentPercent > baseline) {
-      state.metricBaselines.set(key, currentPercent);
-      return { baseline: currentPercent, consumed: 0 };
+    const now = Date.now();
+    const currentResetAt = dateValue(metric.resetsAt)?.toISOString() || null;
+    let baseline = state.metricBaselines.get(key);
+    const expired = baseline !== undefined && now - baseline.capturedAt > METRIC_BASELINE_MAX_AGE_MS;
+    const newResetCycle = baseline !== undefined &&
+      baseline.resetAt !== null &&
+      currentResetAt !== null &&
+      baseline.resetAt !== currentResetAt;
+    if (baseline === undefined || expired || newResetCycle || currentPercent > baseline.remainingPercent) {
+      baseline = { remainingPercent: currentPercent, resetAt: currentResetAt, capturedAt: now };
+      state.metricBaselines.set(key, baseline);
+      persistMetricBaselines();
+    } else if (baseline.resetAt === null && currentResetAt !== null) {
+      baseline = { ...baseline, resetAt: currentResetAt };
+      state.metricBaselines.set(key, baseline);
+      persistMetricBaselines();
     }
-    return { baseline, consumed: baseline - currentPercent };
+    return {
+      baseline: baseline.remainingPercent,
+      capturedAt: baseline.capturedAt,
+      consumed: Math.max(0, baseline.remainingPercent - currentPercent),
+    };
   }
 
   function formatPercentagePoints(value) {
     return new Intl.NumberFormat(undefined, {
       maximumFractionDigits: value < 1 ? 1 : 0,
     }).format(value);
+  }
+
+  function baselineTime(value) {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(value));
   }
 
   function renderMetric(accountId, metric) {
@@ -221,7 +291,7 @@
       bar.append(current);
       if (hasComparison) {
         const points = formatPercentagePoints(consumedSinceOpen);
-        const comparisonLabel = `${points} percentage points used since page opened`;
+        const comparisonLabel = `${points} percentage points used since ${baselineTime(comparison.capturedAt)}`;
         const consumed = create("span", "remaining-bar-consumed");
         consumed.setAttribute("aria-hidden", "true");
         bar.append(consumed);

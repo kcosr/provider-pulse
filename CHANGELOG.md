@@ -7,8 +7,9 @@ All notable changes to Provider Pulse are documented here. The project follows
 
 ### Added
 
-- Dashboard quota bars now retain their first sample for the lifetime of the
-  page and show capacity consumed since then as a muted comparison segment.
+- Dashboard quota bars retain their first sample in browser-local storage for
+  up to 14 days and show capacity consumed since then as a muted comparison
+  segment, rebasing automatically when a quota resets.
 
 ### Fixed
 
