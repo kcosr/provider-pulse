@@ -345,7 +345,7 @@ h1 {
 }
 
 .remaining-bar-consumed {
-  width: var(--consumed-since-open);
+  width: var(--consumed-since-baseline);
   border-left: 1px solid rgba(237, 244, 240, .35);
   border-radius: 0 99px 99px 0;
   background: repeating-linear-gradient(

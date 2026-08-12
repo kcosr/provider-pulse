@@ -115,8 +115,8 @@ systemctl --user start provider-pulse.service
 
 Do not copy or roll back OAuth credential files as part of an application
 rollback. Provider-owned refresh-token chains may have advanced since the prior
-release. The scheduler cursor and diagnostic log may remain in place unless the
-release notes explicitly state otherwise.
+release. The scheduler cursor, usage baseline, and diagnostic log may remain in
+place unless the release notes explicitly state otherwise.
 
 ## Hotfixes
 

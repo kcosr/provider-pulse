@@ -3,12 +3,9 @@
 
   const POLL_INTERVAL_MS = 60_000;
   const ACTION_REFRESH_MS = 800;
-  const METRIC_BASELINE_STORAGE_KEY = "provider-pulse.metric-baselines.v1";
-  const METRIC_BASELINE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
   const state = {
     status: null,
     fetching: false,
-    metricBaselines: loadMetricBaselines(),
     pendingAccounts: new Set(),
     pendingHeartbeats: new Set(),
     pendingBulk: new Set(),
@@ -22,6 +19,7 @@
     heartbeatAll: document.getElementById("heartbeatAll"),
     notice: document.getElementById("notice"),
     overallHealth: document.getElementById("overallHealth"),
+    snapshotUsage: document.getElementById("snapshotUsage"),
     updated: document.getElementById("updated"),
   };
 
@@ -178,70 +176,14 @@
     return "Unavailable";
   }
 
-  function loadMetricBaselines() {
-    const baselines = new Map();
-    try {
-      const stored = window.localStorage.getItem(METRIC_BASELINE_STORAGE_KEY);
-      if (stored === null) return baselines;
-      const payload = JSON.parse(stored);
-      if (payload?.version !== 1 || !Array.isArray(payload.baselines)) return baselines;
-      const now = Date.now();
-      payload.baselines.forEach((record) => {
-        if (
-          typeof record?.key !== "string" ||
-          !Number.isFinite(record.remainingPercent) ||
-          record.remainingPercent < 0 ||
-          record.remainingPercent > 100 ||
-          !Number.isFinite(record.capturedAt) ||
-          record.capturedAt > now ||
-          now - record.capturedAt > METRIC_BASELINE_MAX_AGE_MS ||
-          (record.resetAt !== null && typeof record.resetAt !== "string")
-        ) return;
-        baselines.set(record.key, {
-          remainingPercent: record.remainingPercent,
-          resetAt: record.resetAt,
-          capturedAt: record.capturedAt,
-        });
-      });
-    } catch (_) {
-      // Storage can be unavailable or contain invalid data. The dashboard
-      // remains usable with page-memory baselines in either case.
-    }
-    return baselines;
-  }
-
-  function persistMetricBaselines() {
-    try {
-      window.localStorage.setItem(METRIC_BASELINE_STORAGE_KEY, JSON.stringify({
-        version: 1,
-        baselines: [...state.metricBaselines].map(([key, record]) => ({ key, ...record })),
-      }));
-    } catch (_) {
-      // Quota and privacy restrictions should not affect status rendering.
-    }
-  }
-
   function metricComparison(accountId, metric, currentPercent) {
     if (currentPercent === null) return null;
     const kind = metric.isBalance ? "balance" : "window";
-    const key = `${accountId}\u0000${kind}\u0000${metric.id}`;
-    const now = Date.now();
-    const currentResetAt = dateValue(metric.resetsAt)?.toISOString() || null;
-    let baseline = state.metricBaselines.get(key);
-    const expired = baseline !== undefined && now - baseline.capturedAt > METRIC_BASELINE_MAX_AGE_MS;
-    const newResetCycle = baseline !== undefined &&
-      baseline.resetAt !== null &&
-      currentResetAt !== null &&
-      baseline.resetAt !== currentResetAt;
-    if (baseline === undefined || expired || newResetCycle || currentPercent > baseline.remainingPercent) {
-      baseline = { remainingPercent: currentPercent, resetAt: currentResetAt, capturedAt: now };
-      state.metricBaselines.set(key, baseline);
-      persistMetricBaselines();
-    } else if (baseline.resetAt === null && currentResetAt !== null) {
-      baseline = { ...baseline, resetAt: currentResetAt };
-      state.metricBaselines.set(key, baseline);
-      persistMetricBaselines();
-    }
+    const baseline = asArray(state.status?.usageBaseline?.metrics).find((candidate) =>
+      candidate.accountId === accountId &&
+      candidate.metricKind === kind &&
+      candidate.metricId === metric.id);
+    if (!baseline) return null;
     return {
       baseline: baseline.remainingPercent,
       capturedAt: baseline.capturedAt,
@@ -267,8 +209,8 @@
   function renderMetric(accountId, metric) {
     const percent = metricRemainingPercent(metric);
     const comparison = metricComparison(accountId, metric, percent);
-    const consumedSinceOpen = comparison?.consumed || 0;
-    const hasComparison = consumedSinceOpen >= 0.1;
+    const consumedSinceBaseline = comparison?.consumed || 0;
+    const hasComparison = consumedSinceBaseline >= 0.1;
     const band = percent === null ? "" : percent < 10 ? " critical" : percent < 25 ? " orange" : percent < 50 ? " yellow" : " green";
     const node = create("div", `metric${band}`);
     const line = create("div", "metric-line");
@@ -286,11 +228,11 @@
       bar.setAttribute("aria-valuemax", "100");
       bar.setAttribute("aria-valuenow", String(percent));
       bar.style.setProperty("--remaining", `${percent}%`);
-      bar.style.setProperty("--consumed-since-open", `${consumedSinceOpen}%`);
+      bar.style.setProperty("--consumed-since-baseline", `${consumedSinceBaseline}%`);
       const current = create("span", "remaining-bar-current");
       bar.append(current);
       if (hasComparison) {
-        const points = formatPercentagePoints(consumedSinceOpen);
+        const points = formatPercentagePoints(consumedSinceBaseline);
         const comparisonLabel = `${points} percentage points used since ${baselineTime(comparison.capturedAt)}`;
         const consumed = create("span", "remaining-bar-consumed");
         consumed.setAttribute("aria-hidden", "true");
@@ -417,10 +359,18 @@
     elements.updated.textContent = generatedAt ? `Status updated ${relativeTime(generatedAt)}` : "Current in-memory status";
 
     const anyPollRunning = accounts.some((account) => healthOf(account.usage) === "running");
+    const hasPercentageMetric = accounts.some((account) =>
+      [...windowsFor(account), ...balancesFor(account)]
+        .some((metric) => metricRemainingPercent(metric) !== null));
     const allHeartbeats = asArray(state.status.heartbeats);
     const enabledHeartbeats = allHeartbeats.filter((job) => job.enabled);
     elements.checkAll.disabled = state.pendingBulk.has("check") || anyPollRunning;
     elements.checkAll.textContent = state.pendingBulk.has("check") ? "Checking…" : "Check all";
+    elements.snapshotUsage.disabled = state.pendingBulk.has("snapshot") || anyPollRunning || !hasPercentageMetric;
+    elements.snapshotUsage.textContent = state.pendingBulk.has("snapshot") ? "Saving…" : "Snapshot usage";
+    const baseline = state.status.usageBaseline;
+    elements.snapshotUsage.title = baseline?.error?.message ||
+      (baseline?.updatedAt ? `Replace baselines last updated ${baselineTime(baseline.updatedAt)}` : "Save current usage as the comparison baseline");
     elements.heartbeatAll.disabled = state.pendingBulk.has("heartbeat") || enabledHeartbeats.length === 0 || enabledHeartbeats.some((job) => job.inFlight || healthOf(job) === "running");
     elements.heartbeatAll.textContent = state.pendingBulk.has("heartbeat") ? "Running…" : "Heartbeat all";
   }
@@ -507,7 +457,40 @@
     }
   }
 
+  async function snapshotUsage() {
+    if (state.pendingBulk.has("snapshot")) return;
+    state.pendingBulk.add("snapshot");
+    showNotice("");
+    elements.announcer.textContent = "Saving current usage baselines";
+    render();
+    try {
+      const response = await fetch("/api/usage-baseline/snapshot", {
+        method: "POST",
+        headers: { accept: "application/json", "x-provider-pulse-action": "1" },
+      });
+      if (!response.ok) {
+        let detail = "";
+        try {
+          const body = await response.json();
+          detail = body.error?.message || body.message || "";
+        } catch (_) { /* Response may not be JSON. */ }
+        throw new Error(detail || `Snapshot failed (${response.status})`);
+      }
+      const body = await response.json();
+      if (state.status && body.usageBaseline) state.status.usageBaseline = body.usageBaseline;
+      elements.apiState.textContent = "Usage snapshot saved";
+      elements.announcer.textContent = "Current usage baselines saved";
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Could not save usage baselines.");
+      elements.announcer.textContent = "Usage snapshot failed";
+    } finally {
+      state.pendingBulk.delete("snapshot");
+      render();
+    }
+  }
+
   elements.checkAll.addEventListener("click", () => runAction("/api/check-all", "Checking all accounts", state.pendingBulk, "check"));
+  elements.snapshotUsage.addEventListener("click", snapshotUsage);
   elements.heartbeatAll.addEventListener("click", () => runAction("/api/heartbeat-all", "Running all enabled heartbeats", state.pendingBulk, "heartbeat"));
 
   document.addEventListener("visibilitychange", () => {

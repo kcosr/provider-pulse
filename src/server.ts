@@ -4,6 +4,7 @@ import { join } from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 
 import {
+  ApplicationOperationError,
   ProviderPulseApplication,
   UnknownConfiguredTargetError,
 } from "./application.js";
@@ -81,6 +82,13 @@ export async function buildServer(
   server.post("/api/check-all", async (_request, reply) => {
     return reply.code(202).send({ receipts: application.checkAll() });
   });
+  server.post("/api/usage-baseline/snapshot", async (_request, reply) => {
+    try {
+      return reply.send({ usageBaseline: await application.snapshotUsageBaseline() });
+    } catch (error: unknown) {
+      return actionError(reply, error);
+    }
+  });
   server.post<{ Params: { heartbeatId: string } }>("/api/heartbeats/:heartbeatId/run", async (request, reply) => {
     try {
       return reply.code(202).send(application.runHeartbeat(request.params.heartbeatId));
@@ -102,6 +110,11 @@ export async function buildServer(
 function actionError(reply: FastifyReply, error: unknown) {
   if (error instanceof UnknownConfiguredTargetError) {
     return reply.code(404).send({ error: { code: `${error.kind}_not_found`, message: error.message } });
+  }
+  if (error instanceof ApplicationOperationError) {
+    return reply.code(error.code === "service_stopping" ? 503 : 409).send({
+      error: { code: error.code, message: error.message },
+    });
   }
   throw error;
 }

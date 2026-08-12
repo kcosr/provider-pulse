@@ -209,12 +209,31 @@ export interface AccountStatus {
   heartbeatIds: string[];
 }
 
+export type UsageBaselineMetricKind = "window" | "balance";
+
+export interface UsageBaselineMetric {
+  accountId: string;
+  metricKind: UsageBaselineMetricKind;
+  metricId: string;
+  remainingPercent: number;
+  resetAt?: string;
+  capturedAt: string;
+}
+
+export interface UsageBaselineStatus {
+  health: "unknown" | "healthy" | "unhealthy";
+  updatedAt?: string;
+  metrics: UsageBaselineMetric[];
+  error?: StatusError;
+}
+
 export interface ProviderPulseStatus {
   version: 1;
   generatedAt: string;
   health: HealthState;
   accounts: AccountStatus[];
   heartbeats: HeartbeatStatus[];
+  usageBaseline: UsageBaselineStatus;
 }
 
 export interface OperationReceipt {

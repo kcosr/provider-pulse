@@ -22,6 +22,14 @@ import {
   type CommandResult,
   type CommandRunner,
 } from "./terminal/tmux.js";
+import {
+  emptyUsageBaselineState,
+  loadUsageBaselineState,
+  type StoredUsageBaselineMetric,
+  type UsageBaselineState,
+  usageBaselineMetricKey,
+  writeUsageBaselineStateAtomic,
+} from "./usage-baseline-state.js";
 import type {
   AccountConfig,
   AppConfig,
@@ -34,6 +42,7 @@ import type {
   ProviderPulseStatus,
   StatusError,
   UsageBalance,
+  UsageBaselineStatus,
   UsageSnapshot,
   UsageWindow,
 } from "./types.js";
@@ -245,6 +254,10 @@ export class ProviderPulseApplication {
   readonly #usageWaiters: Array<() => void> = [];
   readonly #scheduler: ResetAwareScheduler;
   readonly #terminalCleanup: (() => Promise<void>) | undefined;
+  readonly #usageBaselineFile: string;
+  #usageBaselineState: UsageBaselineState = emptyUsageBaselineState();
+  #usageBaselineError: StatusError | undefined;
+  #usageBaselineMutationTail: Promise<void> = Promise.resolve();
   #activeUsageCount = 0;
   #automaticPollTimer: NodeJS.Timeout | undefined;
   #initialized = false;
@@ -268,6 +281,7 @@ export class ProviderPulseApplication {
     this.#accounts = new Map(config.accounts.map((account) => [account.id, account]));
     this.#surfaces = new Map(config.credentialSurfaces.map((surface) => [surface.id, surface]));
     this.#jobs = new Map(config.heartbeatJobs.map((job) => [job.id, job]));
+    this.#usageBaselineFile = join(config.paths.stateDirectory, "usage-baseline.json");
 
     const schedulerJobs = config.heartbeatJobs.map((job) => ({
       id: job.id,
@@ -298,6 +312,13 @@ export class ProviderPulseApplication {
     // touching the user's ordinary tmux server.
     await this.#terminalCleanup?.();
     await this.#scheduler.initialize();
+    try {
+      this.#usageBaselineState = await loadUsageBaselineState(this.#usageBaselineFile);
+      this.#usageBaselineError = undefined;
+    } catch (error: unknown) {
+      this.#usageBaselineState = emptyUsageBaselineState();
+      this.#usageBaselineError = normalizeError(error, "usage_baseline_state_invalid");
+    }
     this.#initialized = true;
     this.#scheduler.start();
 
@@ -320,6 +341,7 @@ export class ProviderPulseApplication {
 
   getStatus(): ProviderPulseStatus {
     const snapshot = this.#store.snapshot(this.#now());
+    snapshot.usageBaseline = this.#usageBaselineStatus();
     const staleBefore = this.#now().getTime() - this.#config.polling.staleAfterMinutes * 60_000;
     for (const account of snapshot.accounts) {
       if (
@@ -333,8 +355,38 @@ export class ProviderPulseApplication {
     snapshot.health = aggregateHealth([
       ...snapshot.accounts.map((account) => account.usage.health),
       ...snapshot.heartbeats.filter((heartbeat) => heartbeat.enabled).map((heartbeat) => heartbeat.health),
+      ...(snapshot.usageBaseline.health === "unhealthy" ? ["unhealthy" as const] : []),
     ]);
     return snapshot;
+  }
+
+  async snapshotUsageBaseline(): Promise<UsageBaselineStatus> {
+    this.#assertOpen();
+    if (this.#usageOperations.size > 0) {
+      throw new ApplicationOperationError(
+        "usage_baseline_busy",
+        "Usage baseline cannot be replaced while a usage check is running",
+      );
+    }
+    const capturedAt = this.#now().toISOString();
+    const metrics = [...this.#accounts.keys()].flatMap((accountId) => {
+      const snapshot = this.#store.getAccount(accountId)?.usage.snapshot;
+      return snapshot === undefined
+        ? []
+        : extractUsageBaselineMetrics(accountId, snapshot, capturedAt);
+    });
+    if (metrics.length === 0) {
+      throw new ApplicationOperationError(
+        "usage_baseline_unavailable",
+        "No percentage-based usage values are available to snapshot",
+      );
+    }
+    await this.#mutateUsageBaseline(() => ({
+      version: 1,
+      updatedAt: capturedAt,
+      metrics,
+    }));
+    return this.#usageBaselineStatus();
   }
 
   checkUsage(accountId: string): OperationReceipt {
@@ -406,6 +458,7 @@ export class ProviderPulseApplication {
     ];
     await Promise.allSettled(active);
     await this.#drainResetObservations();
+    await this.#usageBaselineMutationTail.catch(() => undefined);
     await this.#terminalCleanup?.().catch(() => undefined);
   }
 
@@ -457,6 +510,21 @@ export class ProviderPulseApplication {
           snapshot: structuredClone(result.snapshot),
         },
       }));
+      await this.#reconcileUsageBaseline(account.id, result.snapshot, completedAt)
+        .catch(async (error: unknown) => {
+          const normalized = normalizeError(error, "usage_baseline_write_failed");
+          this.#usageBaselineError = normalized;
+          await this.#log({
+            operationId,
+            kind: "system",
+            accountId: account.id,
+            outcome: "usage_baseline_failure",
+            attemptedAt: attemptedAt.toISOString(),
+            completedAt: completedAt.toISOString(),
+            durationMs: Math.max(0, completedAt.getTime() - attemptedAt.getTime()),
+            error: normalized,
+          });
+        });
       const markFreshObservation = this.#usageOperations.get(account.id)?.markFreshObservation ?? false;
       this.#scheduleAccountResetObservation(
         account.id,
@@ -753,6 +821,89 @@ export class ProviderPulseApplication {
     }
   }
 
+  #usageBaselineStatus(): UsageBaselineStatus {
+    return {
+      health: this.#usageBaselineError !== undefined
+        ? "unhealthy"
+        : this.#usageBaselineState.updatedAt === null
+          ? "unknown"
+          : "healthy",
+      ...(this.#usageBaselineState.updatedAt === null
+        ? {}
+        : { updatedAt: this.#usageBaselineState.updatedAt }),
+      metrics: this.#usageBaselineState.metrics.map((metric) => ({
+        accountId: metric.accountId,
+        metricKind: metric.metricKind,
+        metricId: metric.metricId,
+        remainingPercent: metric.remainingPercent,
+        ...(metric.resetAt === null ? {} : { resetAt: metric.resetAt }),
+        capturedAt: metric.capturedAt,
+      })),
+      ...(this.#usageBaselineError === undefined
+        ? {}
+        : { error: structuredClone(this.#usageBaselineError) }),
+    };
+  }
+
+  async #reconcileUsageBaseline(
+    accountId: string,
+    usage: UsageSnapshot,
+    observedAt: Date,
+  ): Promise<void> {
+    const capturedAt = observedAt.toISOString();
+    const observedMetrics = extractUsageBaselineMetrics(accountId, usage, capturedAt);
+    if (observedMetrics.length === 0) return;
+    await this.#mutateUsageBaseline((current) => {
+      const metrics = new Map(current.metrics.map((metric) => [
+        usageBaselineMetricKey(metric.accountId, metric.metricKind, metric.metricId),
+        metric,
+      ]));
+      let changed = false;
+      for (const observed of observedMetrics) {
+        const key = usageBaselineMetricKey(
+          observed.accountId,
+          observed.metricKind,
+          observed.metricId,
+        );
+        const existing = metrics.get(key);
+        if (
+          existing === undefined ||
+          observed.remainingPercent > existing.remainingPercent ||
+          (existing.resetAt !== null &&
+            observed.resetAt !== null &&
+            existing.resetAt !== observed.resetAt) ||
+          isFullyResetAfterKnownDeadline(existing, observed, capturedAt)
+        ) {
+          metrics.set(key, observed);
+          changed = true;
+        } else if (existing.resetAt === null && observed.resetAt !== null) {
+          metrics.set(key, { ...existing, resetAt: observed.resetAt });
+          changed = true;
+        }
+      }
+      if (!changed) return null;
+      return {
+        version: 1,
+        updatedAt: capturedAt,
+        metrics: [...metrics.values()],
+      };
+    });
+  }
+
+  async #mutateUsageBaseline(
+    update: (current: UsageBaselineState) => UsageBaselineState | null,
+  ): Promise<void> {
+    const operation = this.#usageBaselineMutationTail.catch(() => undefined).then(async () => {
+      const next = update(structuredClone(this.#usageBaselineState));
+      if (next === null) return;
+      await writeUsageBaselineStateAtomic(this.#usageBaselineFile, next);
+      this.#usageBaselineState = structuredClone(next);
+      this.#usageBaselineError = undefined;
+    });
+    this.#usageBaselineMutationTail = operation;
+    await operation;
+  }
+
   async #withSurface<T>(surfaceId: string, action: () => Promise<T>): Promise<T> {
     const previous = this.#surfaceTails.get(surfaceId) ?? Promise.resolve();
     let release: (() => void) | undefined;
@@ -953,6 +1104,64 @@ function normalizeParsedWindow(window: {
     ...(window.resetsAt === undefined || window.resetsAt === null ? {} : { resetsAt: window.resetsAt }),
     ...(window.reached === undefined ? {} : { reached: window.reached }),
   };
+}
+
+function extractUsageBaselineMetrics(
+  accountId: string,
+  snapshot: UsageSnapshot,
+  capturedAt: string,
+): StoredUsageBaselineMetric[] {
+  const windows = snapshot.windows.flatMap((window): StoredUsageBaselineMetric[] => {
+    const remainingPercent = normalizedRemainingPercent(
+      window.remainingPercent,
+      window.usedPercent,
+    );
+    if (remainingPercent === null) return [];
+    return [{
+      accountId,
+      metricKind: "window",
+      metricId: window.id,
+      remainingPercent,
+      resetAt: window.resetsAt ?? null,
+      capturedAt,
+    }];
+  });
+  const balances = snapshot.balances.flatMap((balance): StoredUsageBaselineMetric[] => {
+    const remainingPercent = normalizedRemainingPercent(balance.remainingPercent);
+    if (remainingPercent === null) return [];
+    return [{
+      accountId,
+      metricKind: "balance",
+      metricId: balance.id,
+      remainingPercent,
+      resetAt: balance.resetsAt ?? null,
+      capturedAt,
+    }];
+  });
+  return [...windows, ...balances];
+}
+
+function normalizedRemainingPercent(
+  remainingPercent: number | undefined,
+  usedPercent?: number,
+): number | null {
+  const value = remainingPercent ?? (usedPercent === undefined ? undefined : 100 - usedPercent);
+  if (value === undefined || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, value));
+}
+
+function isFullyResetAfterKnownDeadline(
+  existing: StoredUsageBaselineMetric,
+  observed: StoredUsageBaselineMetric,
+  capturedAt: string,
+): boolean {
+  // Claude omits the session reset timestamp while the newly reset five-hour
+  // window is inactive. A full window observed after its former deadline is
+  // enough to rebase that exact window even when its old baseline was 100%.
+  return existing.resetAt !== null &&
+    observed.resetAt === null &&
+    observed.remainingPercent === 100 &&
+    Date.parse(existing.resetAt) <= Date.parse(capturedAt);
 }
 
 function compareIdentity(expected: ExpectedIdentity | undefined, observed: ObservedIdentity) {

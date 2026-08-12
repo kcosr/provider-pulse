@@ -98,6 +98,7 @@ export class StatusStore {
       ]),
       accounts,
       heartbeats,
+      usageBaseline: { health: "unknown", metrics: [] },
     };
   }
 }

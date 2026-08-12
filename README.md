@@ -15,12 +15,16 @@ and quota polling. See [the Fireworks integration notes](docs/fireworks-follow-u
 - Compares an optional expected email with the identity observed by the CLI.
 - Records the current usage-poll and heartbeat health in memory.
 - Runs per-account or bulk usage checks from the web page.
+- Saves one server-side comparison baseline and shows usage consumed since it.
 - Runs manual or reset-aware native-CLI and Pi heartbeats.
 - Exposes one normalized JSON status object at `GET /api/status`.
-- Writes bounded diagnostic JSONL logs and only the minimal scheduler cursor.
+- Writes bounded diagnostic JSONL logs plus minimal scheduler and usage-baseline
+  state files.
 
 Status starts as unknown after every process restart. Provider Pulse is not a
 usage-history database and does not reconstruct dashboard status from its log.
+The current comparison baseline is intentionally reloaded from its small state
+file.
 
 ## Requirements
 
@@ -65,6 +69,7 @@ The recommended layout follows the XDG base-directory convention:
 | --- | --- |
 | Operator configuration | `~/.config/provider-pulse/config.json` |
 | Scheduler cursor | `~/.local/state/provider-pulse/scheduler-state.json` |
+| Usage comparison baseline | `~/.local/state/provider-pulse/usage-baseline.json` |
 | Rotating diagnostic log | `~/.local/state/provider-pulse/events.jsonl` |
 | Temporary probe working directory | `~/.local/state/provider-pulse/probes/` |
 | Isolated native and Pi credential homes | `~/.local/share/provider-pulse/homes/` |
@@ -203,6 +208,7 @@ Actions are started with:
 ```text
 POST /api/accounts/:accountId/check
 POST /api/check-all
+POST /api/usage-baseline/snapshot
 POST /api/heartbeats/:heartbeatId/run
 POST /api/heartbeat-all
 ```
@@ -211,6 +217,11 @@ Actions return operation receipts promptly. Poll `GET /api/status` to observe
 progress and the final per-operation result. Duplicate checks are coalesced and
 operations sharing a credential surface are serialized. Bulk actions preserve
 individual outcomes.
+
+The snapshot action never accepts usage values from the browser. It atomically
+saves the server's current percentage-based readings. When no baseline exists,
+the first successful usage check seeds each available window automatically.
+Provider reset detection rebases only the affected account/window pair.
 
 The web page exposes the same per-card and bulk actions. Heartbeats deliberately
 have no confirmation modal, so treat the buttons as real quota-consuming

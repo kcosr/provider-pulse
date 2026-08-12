@@ -12,6 +12,7 @@ import {
 } from "./application.js";
 import { writeSchedulerCursorAtomic } from "./scheduler-state.js";
 import type { AppConfig, UsageWindow } from "./types.js";
+import { loadUsageBaselineState } from "./usage-baseline-state.js";
 
 describe("ProviderPulseApplication", () => {
   it("coalesces account checks and keeps status reads side-effect free", async () => {
@@ -35,6 +36,80 @@ describe("ProviderPulseApplication", () => {
     await vi.waitFor(() => expect(app.getStatus().accounts[0]?.usage.health).toBe("healthy"));
     expect(probe).toHaveBeenCalledTimes(1);
     await app.close();
+  });
+
+  it("persists baselines and rebases only the provider window that resets", async () => {
+    const config = await testConfig();
+    let now = new Date("2026-08-12T14:00:00.000Z");
+    let windows: UsageWindow[] = [
+      {
+        id: "session",
+        label: "Current session",
+        remainingPercent: 100,
+        resetsAt: "2026-08-12T18:00:00.000Z",
+      },
+      {
+        id: "weekly",
+        label: "Current week",
+        remainingPercent: 80,
+        resetsAt: "2026-08-17T12:00:00.000Z",
+      },
+    ];
+    const usageProbe = vi.fn(async () => successfulUsage("person@example.com", windows));
+    const app = new ProviderPulseApplication(config, { usageProbe, now: () => now });
+
+    app.checkUsage("codex-one");
+    await vi.waitFor(() => expect(app.getStatus().usageBaseline.metrics).toHaveLength(2));
+    expect(app.getStatus().usageBaseline).toMatchObject({
+      health: "healthy",
+      updatedAt: "2026-08-12T14:00:00.000Z",
+      metrics: [
+        { metricId: "session", remainingPercent: 100, capturedAt: "2026-08-12T14:00:00.000Z" },
+        { metricId: "weekly", remainingPercent: 80, capturedAt: "2026-08-12T14:00:00.000Z" },
+      ],
+    });
+
+    now = new Date("2026-08-12T18:05:00.000Z");
+    windows = [
+      {
+        id: "session",
+        label: "Current session",
+        remainingPercent: 100,
+      },
+      {
+        id: "weekly",
+        label: "Current week",
+        remainingPercent: 70,
+        resetsAt: "2026-08-17T12:00:00.000Z",
+      },
+    ];
+    app.checkUsage("codex-one");
+    await vi.waitFor(() => expect(
+      app.getStatus().usageBaseline.metrics.find((metric) => metric.metricId === "session"),
+    ).toMatchObject({
+      remainingPercent: 100,
+      capturedAt: "2026-08-12T18:05:00.000Z",
+    }));
+    expect(app.getStatus().usageBaseline.metrics.find((metric) => metric.metricId === "weekly"))
+      .toMatchObject({
+        remainingPercent: 80,
+        capturedAt: "2026-08-12T14:00:00.000Z",
+      });
+
+    await vi.waitFor(() => expect(app.getStatus().accounts[0]?.usage.inFlight).toBe(false));
+    await app.snapshotUsageBaseline();
+    expect(app.getStatus().usageBaseline.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ metricId: "session", remainingPercent: 100, capturedAt: "2026-08-12T18:05:00.000Z" }),
+      expect.objectContaining({ metricId: "weekly", remainingPercent: 70, capturedAt: "2026-08-12T18:05:00.000Z" }),
+    ]));
+    await app.close();
+
+    const persisted = await loadUsageBaselineState(join(config.paths.stateDirectory, "usage-baseline.json"));
+    expect(persisted.metrics).toHaveLength(2);
+    const restarted = new ProviderPulseApplication(config, { usageProbe, now: () => now });
+    await restarted.initialize();
+    expect(restarted.getStatus().usageBaseline.metrics).toEqual(app.getStatus().usageBaseline.metrics);
+    await restarted.close();
   });
 
   it("bounds check-all concurrency", async () => {

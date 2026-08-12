@@ -19,7 +19,11 @@ describe("HTTP API", () => {
   it("serves side-effect-free status and asynchronous action receipts", async () => {
     const probe = vi.fn(async () => ({
       identity: {},
-      snapshot: { observedAt: new Date().toISOString(), windows: [], balances: [] },
+      snapshot: {
+        observedAt: new Date().toISOString(),
+        windows: [{ id: "weekly", label: "Weekly", remainingPercent: 50 }],
+        balances: [],
+      },
       implementation: "fake",
       implementationVersion: "1",
     }));
@@ -55,6 +59,20 @@ describe("HTTP API", () => {
     expect(action.statusCode).toBe(202);
     expect(action.json()).toMatchObject({ accepted: true, targetId: "codex-one", kind: "usage-check" });
     await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(application.getStatus().usageBaseline.metrics).toHaveLength(1));
+
+    const baseline = await server.inject({
+      method: "POST",
+      url: "/api/usage-baseline/snapshot",
+      headers: actionHeaders(),
+    });
+    expect(baseline.statusCode).toBe(200);
+    expect(baseline.json()).toMatchObject({
+      usageBaseline: {
+        health: "healthy",
+        metrics: [{ accountId: "codex-one", metricId: "weekly", remainingPercent: 50 }],
+      },
+    });
 
     const missing = await server.inject({
       method: "POST",
