@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 import { isolatedProcessEnvironment, type CommandRunner, type TerminalProbe } from "../terminal/tmux.js";
 
@@ -20,7 +21,7 @@ export interface ParsedUsageWindow {
 
 export interface ClaudeUsageSnapshot {
   readonly adapter: "claude-tmux";
-  readonly adapterVersion: 1;
+  readonly adapterVersion: 2;
   readonly identity: ObservedClaudeIdentity;
   readonly windows: readonly ParsedUsageWindow[];
 }
@@ -47,6 +48,7 @@ export class ClaudeAdapterError extends Error {
 const AUTH_TIMEOUT_MS = 15_000;
 const AUTH_OUTPUT_LIMIT = 128 * 1024;
 const USAGE_OUTPUT_LIMIT = 256 * 1024;
+const USAGE_CACHE_LIMIT = 256 * 1024;
 
 export class ClaudeUsageAdapter {
   readonly #runner: CommandRunner;
@@ -110,11 +112,13 @@ export class ClaudeUsageAdapter {
       maxOutputBytes: USAGE_OUTPUT_LIMIT,
     });
 
+    const terminalWindows = parseClaudeUsage(probe.output, this.#now());
+    const cachedWindows = await readClaudeUsageCache(surface.home);
     return {
       adapter: "claude-tmux",
-      adapterVersion: 1,
+      adapterVersion: 2,
       identity,
-      windows: parseClaudeUsage(probe.output, this.#now()),
+      windows: mergeClaudeUsageWindows(terminalWindows, cachedWindows),
     };
   }
 
@@ -132,6 +136,75 @@ export class ClaudeUsageAdapter {
     }
     return parseClaudeIdentity(result.stdout);
   }
+}
+
+export function parseClaudeUsageCache(json: string): readonly ParsedUsageWindow[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new ClaudeAdapterError("usage_parse_failed", "Claude returned invalid cached usage JSON");
+  }
+  if (!isRecord(value)) throw new ClaudeAdapterError("usage_parse_failed", "Claude cached usage state is invalid");
+  const cache = value["cachedUsageUtilization"];
+  if (!isRecord(cache) || !isRecord(cache["utilization"]) || !Array.isArray(cache["utilization"]["limits"])) {
+    return [];
+  }
+
+  const windows: ParsedUsageWindow[] = [];
+  for (const entry of cache["utilization"]["limits"]) {
+    if (!isRecord(entry) || typeof entry["percent"] !== "number" || !Number.isFinite(entry["percent"])) continue;
+    const kind = entry["kind"];
+    let heading: { id: string; label: string } | undefined;
+    if (kind === "session") heading = { id: "session", label: "Current session" };
+    if (kind === "weekly_all") heading = { id: "weekly", label: "Current week (all models)" };
+    if (kind === "weekly_scoped" && isRecord(entry["scope"]) && isRecord(entry["scope"]["model"])) {
+      const model = safeString(entry["scope"]["model"]["display_name"]);
+      if (model !== undefined) heading = scopedClaudeHeading(model);
+    }
+    if (heading === undefined) continue;
+    const usedPercent = clampPercent(entry["percent"]);
+    windows.push({
+      ...heading,
+      usedPercent,
+      remainingPercent: clampPercent(100 - usedPercent),
+      resetsAt: safeTimestamp(entry["resets_at"]),
+    });
+  }
+  return windows;
+}
+
+export function mergeClaudeUsageWindows(
+  terminalWindows: readonly ParsedUsageWindow[],
+  cachedWindows: readonly ParsedUsageWindow[],
+): readonly ParsedUsageWindow[] {
+  const cachedById = new Map(cachedWindows.map((window) => [window.id, window]));
+  const merged = terminalWindows.map((window) => ({
+    ...window,
+    resetsAt: window.resetsAt ?? cachedById.get(window.id)?.resetsAt ?? null,
+  }));
+  const terminalIds = new Set(terminalWindows.map((window) => window.id));
+  merged.push(...cachedWindows.filter((window) => !terminalIds.has(window.id)));
+  return merged;
+}
+
+async function readClaudeUsageCache(home: string): Promise<readonly ParsedUsageWindow[]> {
+  try {
+    const path = claudeStateFile(home);
+    const metadata = await stat(path);
+    if (!metadata.isFile() || metadata.size > USAGE_CACHE_LIMIT) return [];
+    return parseClaudeUsageCache(await readFile(path, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function claudeStateFile(home: string): string {
+  const ambientHome = process.env.HOME;
+  if (ambientHome !== undefined && resolve(home) === resolve(ambientHome, ".claude")) {
+    return resolve(ambientHome, ".claude.json");
+  }
+  return join(home, ".claude.json");
 }
 
 export function parseClaudeIdentity(json: string): ObservedClaudeIdentity {
@@ -201,6 +274,10 @@ function parseClaudeUsageHeading(line: string): { id: string; label: string } | 
   }
   const model = line.match(/^current week\s*\((.+?)\s+only\)$/i)?.[1]?.trim();
   if (model === undefined || model.length === 0 || model.length > 80) return undefined;
+  return scopedClaudeHeading(model);
+}
+
+function scopedClaudeHeading(model: string): { id: string; label: string } | undefined {
   const modelId = model
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -302,6 +379,12 @@ function safeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 && trimmed.length <= 256 ? trimmed : undefined;
+}
+
+function safeTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
 }
 
 function clampPercent(value: number): number {

@@ -347,9 +347,13 @@ export class ProviderPulseApplication {
   heartbeatAll(): readonly OperationReceipt[] {
     this.#assertOpen();
     const receipts: OperationReceipt[] = [];
+    const executionTuples = new Set<string>();
     let tail = Promise.resolve();
     for (const job of this.#jobs.values()) {
       if (!job.enabled) continue;
+      const tuple = heartbeatExecutionTuple(job);
+      if (executionTuples.has(tuple)) continue;
+      executionTuples.add(tuple);
       const existing = this.#heartbeatOperations.get(job.id);
       if (existing !== undefined) {
         receipts.push(receipt(existing.operationId, job.id, "heartbeat", true));
@@ -806,6 +810,18 @@ function withoutError<T extends { error?: StatusError }>(value: T): Omit<T, "err
   const copy = { ...value };
   delete copy.error;
   return copy;
+}
+
+function heartbeatExecutionTuple(job: HeartbeatJobConfig): string {
+  return [
+    job.accountId,
+    job.credentialSurfaceId,
+    job.executor,
+    job.provider ?? "",
+    job.model,
+    job.reasoning,
+    job.prompt,
+  ].join("\u0000");
 }
 
 function normalizeError(error: unknown, fallbackCode: string): StatusError {

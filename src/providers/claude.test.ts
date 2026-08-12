@@ -4,8 +4,10 @@ import type { CommandRequest, CommandResult, CommandRunner, TerminalProbe, Termi
 import {
   ClaudeAdapterError,
   ClaudeUsageAdapter,
+  mergeClaudeUsageWindows,
   parseClaudeIdentity,
   parseClaudeUsage,
+  parseClaudeUsageCache,
 } from "./claude.js";
 
 const fixtureUrl = (name: string): URL => new URL(`./fixtures/${name}`, import.meta.url);
@@ -28,6 +30,55 @@ describe("Claude usage parser", () => {
     expect(() => parseClaudeUsage("Usage is currently unavailable")).toThrowError(
       expect.objectContaining({ code: "usage_parse_failed" }),
     );
+  });
+
+  it("supplements terminal usage with cached reset times and scoped limits", () => {
+    const terminal = parseClaudeUsage(`
+Current session
+6% used
+Current week (all models)
+10% used
+`);
+    const cached = parseClaudeUsageCache(JSON.stringify({
+      cachedUsageUtilization: {
+        utilization: {
+          limits: [
+            { kind: "session", percent: 6, resets_at: "2026-08-12T06:20:00Z", scope: null },
+            { kind: "weekly_all", percent: 10, resets_at: "2026-08-17T09:00:00Z", scope: null },
+            {
+              kind: "weekly_scoped",
+              percent: 19,
+              resets_at: "2026-08-17T09:00:00Z",
+              scope: { model: { display_name: "Fable" } },
+            },
+          ],
+        },
+      },
+    }));
+
+    expect(mergeClaudeUsageWindows(terminal, cached)).toEqual([
+      {
+        id: "session",
+        label: "Current session",
+        usedPercent: 6,
+        remainingPercent: 94,
+        resetsAt: "2026-08-12T06:20:00.000Z",
+      },
+      {
+        id: "weekly",
+        label: "Current week (all models)",
+        usedPercent: 10,
+        remainingPercent: 90,
+        resetsAt: "2026-08-17T09:00:00.000Z",
+      },
+      {
+        id: "fable-weekly",
+        label: "Current week (Fable)",
+        usedPercent: 19,
+        remainingPercent: 81,
+        resetsAt: "2026-08-17T09:00:00.000Z",
+      },
+    ]);
   });
 });
 

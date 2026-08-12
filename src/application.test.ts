@@ -114,6 +114,25 @@ describe("ProviderPulseApplication", () => {
     await app.close();
   });
 
+  it("runs one bulk heartbeat for jobs that differ only by reset trigger", async () => {
+    const config = await testConfig(true);
+    delete config.accounts[0]!.expectedIdentity;
+    config.heartbeatJobs.push({
+      ...config.heartbeatJobs[0]!,
+      id: "codex-one-native-session",
+      trigger: { type: "after-reset", windowId: "session", offsetMinutes: 2 },
+    });
+    const heartbeatRunner = vi.fn(async () => ({ durationMs: 2 }));
+    const app = new ProviderPulseApplication(config, {
+      usageProbe: async () => successfulUsage(),
+      heartbeatRunner,
+    });
+
+    expect(app.heartbeatAll()).toHaveLength(1);
+    await vi.waitFor(() => expect(heartbeatRunner).toHaveBeenCalledTimes(1));
+    await app.close();
+  });
+
   it("fails closed when expected identity cannot verify a distinct heartbeat surface", async () => {
     const config = await testConfig();
     config.credentialSurfaces.push({

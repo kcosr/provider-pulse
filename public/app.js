@@ -123,6 +123,29 @@
     return asArray(state.status?.heartbeats).filter((job) => job.accountId === account.id);
   }
 
+  function heartbeatExecutionKey(job) {
+    return [job.credentialSurfaceId, job.executor, job.provider || "", job.model, job.reasoning].join("\u0000");
+  }
+
+  function heartbeatGroupsFor(account) {
+    const groups = new Map();
+    heartbeatsFor(account).forEach((job) => {
+      const key = heartbeatExecutionKey(job);
+      const group = groups.get(key) || [];
+      group.push(job);
+      groups.set(key, group);
+    });
+    return [...groups.values()];
+  }
+
+  function combinedHeartbeat(group) {
+    const running = group.find((job) => state.pendingHeartbeats.has(job.id) || job.inFlight || healthOf(job) === "running");
+    const attempted = [...group]
+      .filter((job) => attemptTime(job))
+      .sort((left, right) => Date.parse(attemptTime(right)) - Date.parse(attemptTime(left)))[0];
+    return { ...(running || attempted || group[0]), inFlight: Boolean(running), health: running ? "running" : healthOf(attempted || group[0]) };
+  }
+
   function metricPercent(metric) {
     const value = metric.usedPercent ?? metric.percentUsed ?? metric.percentage ?? metric.valuePercent ??
       (metric.remainingPercent == null ? null : 100 - Number(metric.remainingPercent));
@@ -204,7 +227,8 @@
   function renderAccount(account) {
     const usagePoll = account.usage || {};
     const identity = identityFor(account);
-    const heartbeatJobs = heartbeatsFor(account);
+    const heartbeatGroups = heartbeatGroupsFor(account);
+    const heartbeatJobs = heartbeatGroups.flat();
     const pendingPoll = state.pendingAccounts.has(account.id) || usagePoll.inFlight || healthOf(usagePoll) === "running";
     const hasHeartbeatRunning = heartbeatJobs.some((job) => state.pendingHeartbeats.has(job.id) || job.inFlight || healthOf(job) === "running");
     const accountHealth = identity.match === false ? "unhealthy" : healthOf(usagePoll);
@@ -241,8 +265,8 @@
     const footer = create("div", "card-footer");
     const operations = create("div", "operations");
     operations.append(operationNode("Poll", usagePoll, pendingPoll));
-    if (heartbeatJobs.length) {
-      heartbeatJobs.forEach((job) => operations.append(operationNode(heartbeatJobs.length > 1 ? job.label || job.model || "Heartbeat" : "Heartbeat", job, state.pendingHeartbeats.has(job.id))));
+    if (heartbeatGroups.length) {
+      heartbeatGroups.forEach((group) => operations.append(operationNode("Heartbeat", combinedHeartbeat(group), group.some((job) => state.pendingHeartbeats.has(job.id)))));
     } else {
       operations.append(operationNode("No heartbeat", { enabled: false }, false));
     }
@@ -255,12 +279,13 @@
       () => runAction(`/api/accounts/${encodeURIComponent(account.id)}/check`, `Checking ${account.label || provider.label}`, state.pendingAccounts, account.id),
       pendingPoll,
     ));
-    heartbeatJobs.forEach((job) => {
-      const running = state.pendingHeartbeats.has(job.id) || job.inFlight || healthOf(job) === "running";
-      const blocked = job.enabled === false || identity.match === false;
+    heartbeatGroups.forEach((group) => {
+      const job = group.find((candidate) => candidate.enabled) || group[0];
+      const running = group.some((candidate) => state.pendingHeartbeats.has(candidate.id) || candidate.inFlight || healthOf(candidate) === "running");
+      const blocked = group.every((candidate) => candidate.enabled === false) || identity.match === false;
       const tuple = [job.executor, job.provider, job.model, job.reasoning].filter(Boolean).join(" · ");
       actions.append(button(
-        running ? "Running…" : heartbeatJobs.length > 1 ? `Heartbeat · ${job.model || job.label || job.id}` : "Heartbeat",
+        running ? "Running…" : "Heartbeat",
         "action-button heartbeat",
         () => runAction(`/api/heartbeats/${encodeURIComponent(job.id)}/run`, `Running ${job.label || "heartbeat"}`, state.pendingHeartbeats, job.id),
         running || blocked || hasHeartbeatRunning,
