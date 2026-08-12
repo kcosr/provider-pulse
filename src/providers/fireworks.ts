@@ -33,6 +33,16 @@ const quotasSchema = z.object({
   quotas: z.array(quotaSchema),
 });
 
+const moneySchema = z.object({
+  currencyCode: z.string().min(1),
+  units: z.string().regex(/^-?\d+$/u),
+  nanos: z.number().int().min(-999_999_999).max(999_999_999),
+});
+
+const billingSummarySchema = z.object({
+  lineItems: z.array(z.object({ totalCost: moneySchema })),
+});
+
 type FireworksFetch = typeof fetch;
 
 export interface FireworksProbeOptions {
@@ -81,10 +91,18 @@ export async function probeFireworksUsage(
   }
 
   const encodedAccountId = encodeURIComponent(accountId);
+  const observedAt = (options.now ?? (() => new Date()))();
+  const billingPeriod = utcMonthRange(observedAt);
+  const billingUrl = new URL(
+    `${FIREWORKS_API_BASE}/accounts/${encodedAccountId}/billing/summary`,
+  );
+  billingUrl.searchParams.set("startTime", billingPeriod.start.toISOString());
+  billingUrl.searchParams.set("endTime", billingPeriod.end.toISOString());
   let accountValue: unknown;
   let quotasValue: unknown;
+  let billingValue: unknown;
   try {
-    [accountValue, quotasValue] = await Promise.all([
+    [accountValue, quotasValue, billingValue] = await Promise.all([
       fetchJson(
         fetchImplementation,
         `${FIREWORKS_API_BASE}/accounts/${encodedAccountId}`,
@@ -97,6 +115,7 @@ export async function probeFireworksUsage(
         apiKey,
         timeoutMs,
       ),
+      fetchJson(fetchImplementation, billingUrl.href, apiKey, timeoutMs),
     ]);
   } catch (error) {
     if (error instanceof FireworksProbeError) throw error;
@@ -116,6 +135,7 @@ export async function probeFireworksUsage(
 
   const account = parseResponse(accountSchema, accountValue, "account");
   const quotaResponse = parseResponse(quotasSchema, quotasValue, "quota");
+  const billingSummary = parseResponse(billingSummarySchema, billingValue, "billing");
   const observedAccountId = resourceId(account.name, "accounts");
   if (observedAccountId !== accountId) {
     throw new FireworksProbeError(
@@ -134,7 +154,8 @@ export async function probeFireworksUsage(
     );
   }
 
-  const normalized = normalizeQuotas(quotaResponse.quotas, accountId);
+  const monthlySpend = sumBillingCosts(billingSummary.lineItems);
+  const normalized = normalizeQuotas(quotaResponse.quotas, accountId, monthlySpend);
   return {
     identity: {
       email: account.email,
@@ -144,7 +165,7 @@ export async function probeFireworksUsage(
         : { organizationName: account.displayName.trim() }),
       authMethod: "api-key",
     },
-    observedAt: (options.now ?? (() => new Date()))().toISOString(),
+    observedAt: observedAt.toISOString(),
     windows: normalized.windows,
     balances: normalized.balances,
     adapter: "fireworks-api",
@@ -261,6 +282,7 @@ function resourceId(resourceName: string, collection: string): string {
 function normalizeQuotas(
   quotas: z.infer<typeof quotaSchema>[],
   accountId: string,
+  monthlySpend: number,
 ): {
   windows: UsageWindow[];
   balances: UsageBalance[];
@@ -278,55 +300,79 @@ function normalizeQuotas(
   const windows: UsageWindow[] = [];
   const balances: UsageBalance[] = [];
 
-  const requestRate = byId.get("serverless-inference-rpm");
-  if (requestRate !== undefined) {
-    const limit = decimal(requestRate.value);
-    if (limit !== null && limit > 0) {
-      const usedPercent = clampPercent(requestRate.usage / limit * 100);
-      windows.push({
-        id: "serverless-inference-rpm",
-        label: "Serverless RPM",
-        usedPercent,
-        remainingPercent: clampPercent(100 - usedPercent),
-        reached: requestRate.usage >= limit,
-      });
-    }
-  }
-
-  const monthlySpend = byId.get("monthly-spend-usd");
-  if (monthlySpend !== undefined) {
-    const configuredLimit = decimal(monthlySpend.value);
-    const maximumLimit = decimal(monthlySpend.maxValue);
+  const monthlySpendQuota = byId.get("monthly-spend-usd");
+  if (monthlySpendQuota !== undefined) {
+    const configuredLimit = decimal(monthlySpendQuota.value);
+    const maximumLimit = decimal(monthlySpendQuota.maxValue);
     const unlimited = configuredLimit !== null && maximumLimit !== null &&
       configuredLimit >= UNLIMITED_MONTHLY_SPEND_SENTINEL &&
       maximumLimit >= UNLIMITED_MONTHLY_SPEND_SENTINEL;
     balances.push({
       id: "monthly-spend",
       label: "Monthly spend",
-      amount: monthlySpend.usage,
+      amount: monthlySpend,
       currency: "USD",
-      used: String(monthlySpend.usage),
+      used: String(monthlySpend),
       ...(configuredLimit === null ? {} : { limit: String(configuredLimit) }),
       ...(unlimited ? { unlimited: true } : {}),
     });
     if (!unlimited && configuredLimit !== null && configuredLimit > 0) {
-      const usedPercent = clampPercent(monthlySpend.usage / configuredLimit * 100);
+      const usedPercent = clampPercent(monthlySpend / configuredLimit * 100);
       windows.push({
         id: "monthly-budget",
         label: "Monthly budget",
         usedPercent,
         remainingPercent: clampPercent(100 - usedPercent),
-        reached: monthlySpend.usage >= configuredLimit,
+        reached: monthlySpend >= configuredLimit,
       });
     }
+  } else {
+    balances.push({
+      id: "monthly-spend",
+      label: "Monthly spend",
+      amount: monthlySpend,
+      currency: "USD",
+      used: String(monthlySpend),
+    });
   }
 
   balances.push({
     id: "prepaid-balance",
-    label: "Prepaid balance",
-    unit: "unavailable",
+    label: "Prepaid credits",
+    unit: "Web only",
   });
   return { windows, balances };
+}
+
+function sumBillingCosts(
+  lineItems: z.infer<typeof billingSummarySchema>["lineItems"],
+): number {
+  let total = 0;
+  for (const lineItem of lineItems) {
+    if (lineItem.totalCost.currencyCode !== "USD") {
+      throw new FireworksProbeError(
+        "usage_parse_failed",
+        "Fireworks billing response used an unsupported currency",
+      );
+    }
+    const units = Number(lineItem.totalCost.units);
+    const value = units + lineItem.totalCost.nanos / 1_000_000_000;
+    if (!Number.isSafeInteger(units) || !Number.isFinite(value)) {
+      throw new FireworksProbeError(
+        "usage_parse_failed",
+        "Fireworks billing response contained an invalid amount",
+      );
+    }
+    total += value;
+  }
+  return total;
+}
+
+function utcMonthRange(value: Date): { start: Date; end: Date } {
+  return {
+    start: new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1)),
+    end: new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 1)),
+  };
 }
 
 function decimal(value: string): number | null {

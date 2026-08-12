@@ -16,7 +16,7 @@ const ACCOUNT = {
 };
 
 describe("probeFireworksUsage", () => {
-  it("normalizes account identity, useful quotas, spend, and unavailable prepaid balance", async () => {
+  it("normalizes account identity, exact monthly spend, and web-only prepaid credits", async () => {
     await withCredential(async (credentialFile) => {
       const fetchImplementation = responseRouter({
         account: ACCOUNT,
@@ -27,6 +27,7 @@ describe("probeFireworksUsage", () => {
             quota("training-h100-count", "16", 0),
           ],
         },
+        billing: billingSummary(376.481037696),
       });
 
       const result = await probeFireworksUsage({
@@ -42,24 +43,22 @@ describe("probeFireworksUsage", () => {
         organizationName: "Personal",
         authMethod: "api-key",
       });
-      expect(result.windows).toEqual([{
-        id: "serverless-inference-rpm",
-        label: "Serverless RPM",
-        usedPercent: 25,
-        remainingPercent: 75,
-        reached: false,
-      }]);
+      expect(result.windows).toEqual([]);
       expect(result.balances).toEqual([
         expect.objectContaining({
           id: "monthly-spend",
-          amount: 376.48,
+          amount: 376.481037696,
           currency: "USD",
           unlimited: true,
         }),
-        { id: "prepaid-balance", label: "Prepaid balance", unit: "unavailable" },
+        { id: "prepaid-balance", label: "Prepaid credits", unit: "Web only" },
       ]);
       expect(result.observedAt).toBe("2026-08-12T05:00:00.000Z");
-      expect(fetchImplementation).toHaveBeenCalledTimes(2);
+      expect(fetchImplementation).toHaveBeenCalledTimes(3);
+      expect(fetchImplementation).toHaveBeenCalledWith(
+        expect.stringContaining("/billing/summary?startTime=2026-08-01T00%3A00%3A00.000Z&endTime=2026-09-01T00%3A00%3A00.000Z"),
+        expect.anything(),
+      );
     });
   });
 
@@ -71,6 +70,7 @@ describe("probeFireworksUsage", () => {
         fetchImplementation: responseRouter({
           account: ACCOUNT,
           quotas: { quotas: [quota("monthly-spend-usd", "500", 125)] },
+          billing: billingSummary(125),
         }),
       });
 
@@ -110,6 +110,7 @@ describe("probeFireworksUsage", () => {
         fetchImplementation: responseRouter({
           account: { ...ACCOUNT, email: 123 },
           quotas: { quotas: [] },
+          billing: billingSummary(0),
         }),
       }).catch((reason: unknown) => reason);
 
@@ -132,15 +133,30 @@ describe("probeFireworksUsage", () => {
   });
 });
 
-function responseRouter(values: { account: unknown; quotas: unknown }): typeof fetch {
+function responseRouter(values: { account: unknown; quotas: unknown; billing: unknown }): typeof fetch {
   return vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
-    const body = url.endsWith("/quotas") ? values.quotas : values.account;
+    const body = url.includes("/billing/summary")
+      ? values.billing
+      : url.endsWith("/quotas")
+        ? values.quotas
+        : values.account;
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   });
+}
+
+function billingSummary(amount: number) {
+  const units = Math.trunc(amount);
+  const nanos = Math.round((amount - units) * 1_000_000_000);
+  return {
+    lineItems: [{
+      totalCost: { currencyCode: "USD", units: String(units), nanos },
+    }],
+    usageBuckets: [],
+  };
 }
 
 function quota(id: string, value: string, usage: number) {

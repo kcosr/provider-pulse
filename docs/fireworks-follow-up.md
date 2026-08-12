@@ -1,21 +1,24 @@
 # Fireworks integration
 
-Status: implemented using the official Fireworks account and quota APIs.
+Status: implemented using the official Fireworks account, quota, and billing
+summary APIs.
 
 ## Goals
 
 The integration adds a Fireworks logical account without changing the
 provider-neutral status, health, usage-window, action, or heartbeat contracts.
 It reports the supported machine-readable usage information and truthfully
-marks the unsupported prepaid balance as unavailable.
+marks the API-unavailable prepaid balance as web-only.
 
 ## Supported surfaces
 
 - `GET /v1/accounts/{account_id}` supplies account identity and state.
 - `GET /v1/accounts/{account_id}/quotas` supplies monthly spend, configured
   budget, request-rate, GPU, and deployment quotas.
-- The adapter currently presents monthly spend and the serverless RPM envelope.
-  A finite monthly budget is normalized to percent remaining.
+- `GET /v1/accounts/{account_id}/billing/summary` supplies exact rated costs for
+  the current calendar month. Those line items are summed as monthly spend.
+- The adapter presents monthly spend as currency, not as a percentage. Only a
+  genuinely finite monthly budget is normalized to percent remaining.
 - API credentials live in a dedicated `0600` file and are never copied into Pi.
 
 If an API returns only monthly spend and a spend limit, expose a computed value

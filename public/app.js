@@ -170,6 +170,7 @@
       }
       return metric.unit ? `${metric.amount} ${metric.unit}` : String(metric.amount);
     }
+    if (metric.unit != null) return String(metric.unit);
     return "Unavailable";
   }
 

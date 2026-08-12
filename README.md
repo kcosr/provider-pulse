@@ -34,10 +34,12 @@ usage-history database and does not reconstruct dashboard status from its log.
 Codex polling uses its structured app-server protocol. Claude and Grok usage
 polling requires tmux because their usage data is currently exposed through
 interactive `/usage` screens rather than a suitable headless JSON command.
-Fireworks polling calls the official structured account and quota APIs. It
-shows account identity, health, monthly spend, and useful inference quotas.
-Fireworks does not expose a supported machine-readable prepaid credit balance,
-so that field is explicitly shown as unavailable rather than inferred.
+Fireworks polling calls the official structured account, quota, and billing
+summary APIs. It shows account identity, health, and exact calendar-month
+spend. A finite monthly budget is also shown as capacity remaining.
+Fireworks' web UI shows prepaid credits, but its documented API-key management
+APIs do not expose that balance, so the card marks it `Web only` rather than
+estimating it.
 
 ## Install and verify
 
