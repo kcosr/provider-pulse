@@ -321,27 +321,50 @@ h1 {
 .remaining-bar {
   height: 4px;
   margin-top: 6px;
+  display: flex;
   overflow: hidden;
   border-radius: 99px;
   background: #222a26;
 }
 
-.remaining-bar span {
+.remaining-bar-current,
+.remaining-bar-consumed {
   display: block;
-  width: var(--remaining);
   height: 100%;
+  flex: 0 0 auto;
+}
+
+.remaining-bar-current {
+  width: var(--remaining);
   border-radius: inherit;
   background: var(--green);
+}
+
+.remaining-bar.has-comparison .remaining-bar-current {
+  border-radius: 99px 0 0 99px;
+}
+
+.remaining-bar-consumed {
+  width: var(--consumed-since-open);
+  border-left: 1px solid rgba(237, 244, 240, .35);
+  border-radius: 0 99px 99px 0;
+  background: repeating-linear-gradient(
+    135deg,
+    #6e7873 0,
+    #6e7873 2px,
+    #505a55 2px,
+    #505a55 4px
+  );
 }
 
 .metric.green .metric-value { color: var(--green); }
 .metric.yellow .metric-value { color: var(--yellow); }
 .metric.orange .metric-value { color: var(--orange); }
 .metric.critical .metric-value { color: var(--red); }
-.remaining-bar.yellow span { background: var(--yellow); }
-.remaining-bar.orange span { background: var(--orange); }
+.remaining-bar.yellow .remaining-bar-current { background: var(--yellow); }
+.remaining-bar.orange .remaining-bar-current { background: var(--orange); }
 .remaining-bar.critical { background: rgba(238, 111, 105, .16); }
-.remaining-bar.critical span { background: var(--red); }
+.remaining-bar.critical .remaining-bar-current { background: var(--red); }
 
 .empty-metrics {
   display: grid;

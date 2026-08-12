@@ -5,6 +5,11 @@ All notable changes to Provider Pulse are documented here. The project follows
 
 ## Unreleased
 
+### Added
+
+- Dashboard quota bars now retain their first sample for the lifetime of the
+  page and show capacity consumed since then as a muted comparison segment.
+
 ### Fixed
 
 - Prevented reset-aware scheduler verification polls from deadlocking when

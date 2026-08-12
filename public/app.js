@@ -6,6 +6,7 @@
   const state = {
     status: null,
     fetching: false,
+    metricBaselines: new Map(),
     pendingAccounts: new Set(),
     pendingHeartbeats: new Set(),
     pendingBulk: new Set(),
@@ -175,8 +176,29 @@
     return "Unavailable";
   }
 
-  function renderMetric(metric) {
+  function metricComparison(accountId, metric, currentPercent) {
+    if (currentPercent === null) return null;
+    const kind = metric.isBalance ? "balance" : "window";
+    const key = `${accountId}\u0000${kind}\u0000${metric.id}`;
+    const baseline = state.metricBaselines.get(key);
+    if (baseline === undefined || currentPercent > baseline) {
+      state.metricBaselines.set(key, currentPercent);
+      return { baseline: currentPercent, consumed: 0 };
+    }
+    return { baseline, consumed: baseline - currentPercent };
+  }
+
+  function formatPercentagePoints(value) {
+    return new Intl.NumberFormat(undefined, {
+      maximumFractionDigits: value < 1 ? 1 : 0,
+    }).format(value);
+  }
+
+  function renderMetric(accountId, metric) {
     const percent = metricRemainingPercent(metric);
+    const comparison = metricComparison(accountId, metric, percent);
+    const consumedSinceOpen = comparison?.consumed || 0;
+    const hasComparison = consumedSinceOpen >= 0.1;
     const band = percent === null ? "" : percent < 10 ? " critical" : percent < 25 ? " orange" : percent < 50 ? " yellow" : " green";
     const node = create("div", `metric${band}`);
     const line = create("div", "metric-line");
@@ -187,14 +209,25 @@
     node.append(line);
 
     if (percent !== null) {
-      const bar = create("div", `remaining-bar${band}`);
+      const bar = create("div", `remaining-bar${band}${hasComparison ? " has-comparison" : ""}`);
       bar.setAttribute("role", "progressbar");
       bar.setAttribute("aria-label", `${label} remaining`);
       bar.setAttribute("aria-valuemin", "0");
       bar.setAttribute("aria-valuemax", "100");
       bar.setAttribute("aria-valuenow", String(percent));
       bar.style.setProperty("--remaining", `${percent}%`);
-      bar.append(create("span"));
+      bar.style.setProperty("--consumed-since-open", `${consumedSinceOpen}%`);
+      const current = create("span", "remaining-bar-current");
+      bar.append(current);
+      if (hasComparison) {
+        const points = formatPercentagePoints(consumedSinceOpen);
+        const comparisonLabel = `${points} percentage points used since page opened`;
+        const consumed = create("span", "remaining-bar-consumed");
+        consumed.setAttribute("aria-hidden", "true");
+        bar.append(consumed);
+        bar.title = comparisonLabel;
+        bar.setAttribute("aria-valuetext", `${metricValue(metric)}; ${comparisonLabel}`);
+      }
       node.append(bar);
     }
     return node;
@@ -261,7 +294,7 @@
 
     const metrics = create("div", "metrics");
     const availableMetrics = [...windowsFor(account), ...balancesFor(account)];
-    if (availableMetrics.length) availableMetrics.forEach((metric) => metrics.append(renderMetric(metric)));
+    if (availableMetrics.length) availableMetrics.forEach((metric) => metrics.append(renderMetric(account.id, metric)));
     else metrics.append(create("div", "empty-metrics", pendingPoll ? "Checking provider usage…" : "Usage unavailable — check this account"));
     card.append(metrics);
 
