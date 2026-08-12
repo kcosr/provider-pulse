@@ -4,7 +4,6 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 
 import {
-  CREDENTIAL_SURFACE_KINDS,
   PROVIDERS,
   USAGE_ADAPTERS,
   type AppConfig,
@@ -54,9 +53,8 @@ const accountSchema = z.strictObject({
   }),
 });
 
-const credentialSurfaceSchema = z.strictObject({
+const cliCredentialSurfaceBase = {
   id: idSchema,
-  kind: z.enum(CREDENTIAL_SURFACE_KINDS),
   home: absolutePathSchema,
   executable: z
     .string()
@@ -66,7 +64,19 @@ const credentialSurfaceSchema = z.strictObject({
     .refine((value) => isAbsolute(value) || !value.includes("/"), {
       message: "must be an absolute path or an executable name resolved through PATH",
     }),
-});
+};
+
+const credentialSurfaceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("native-codex") }),
+  z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("native-claude") }),
+  z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("native-grok") }),
+  z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("pi") }),
+  z.strictObject({
+    id: idSchema,
+    kind: z.literal("fireworks-api"),
+    credentialFile: absolutePathSchema,
+  }),
+]);
 
 const triggerSchema = z.strictObject({
   type: z.literal("after-reset"),
@@ -129,6 +139,7 @@ const configSchema = z
       "codex-app-server": { provider: "codex", surface: "native-codex" },
       "claude-tmux": { provider: "claude", surface: "native-claude" },
       "grok-tmux": { provider: "grok", surface: "native-grok" },
+      "fireworks-api": { provider: "fireworks", surface: "fireworks-api" },
     } as const;
 
     config.accounts.forEach((account, index) => {
@@ -144,12 +155,25 @@ const configSchema = z
       if (surface.kind !== expected.surface) {
         addIssue(context, ["accounts", index, "usageSource", "credentialSurfaceId"], `requires a ${expected.surface} credential surface`);
       }
+      if (account.provider === "fireworks" && account.expectedIdentity?.accountId === undefined) {
+        addIssue(
+          context,
+          ["accounts", index, "expectedIdentity", "accountId"],
+          "is required to select and verify a Fireworks account",
+        );
+      }
     });
 
     config.heartbeatJobs.forEach((job, index) => {
       const account = accounts.get(job.accountId);
       if (account === undefined) {
         addIssue(context, ["heartbeatJobs", index, "accountId"], "references an unknown account");
+      } else if (account.provider === "fireworks") {
+        addIssue(
+          context,
+          ["heartbeatJobs", index, "accountId"],
+          "Fireworks accounts do not support heartbeats",
+        );
       } else if (job.executor !== "pi") {
         const expectedProvider = job.executor.replace(/^native-/, "");
         if (account.provider !== expectedProvider) {

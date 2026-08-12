@@ -1,19 +1,27 @@
-export const PROVIDERS = ["codex", "claude", "grok"] as const;
+export const PROVIDERS = ["codex", "claude", "grok", "fireworks"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
-export const CREDENTIAL_SURFACE_KINDS = [
+export const HEARTBEAT_EXECUTORS = [
   "native-codex",
   "native-claude",
   "native-grok",
   "pi",
 ] as const;
+export type HeartbeatExecutor = (typeof HEARTBEAT_EXECUTORS)[number];
+
+export const CREDENTIAL_SURFACE_KINDS = [
+  ...HEARTBEAT_EXECUTORS,
+  "fireworks-api",
+] as const;
 export type CredentialSurfaceKind = (typeof CREDENTIAL_SURFACE_KINDS)[number];
 
-export const USAGE_ADAPTERS = ["codex-app-server", "claude-tmux", "grok-tmux"] as const;
+export const USAGE_ADAPTERS = [
+  "codex-app-server",
+  "claude-tmux",
+  "grok-tmux",
+  "fireworks-api",
+] as const;
 export type UsageAdapter = (typeof USAGE_ADAPTERS)[number];
-
-export const HEARTBEAT_EXECUTORS = CREDENTIAL_SURFACE_KINDS;
-export type HeartbeatExecutor = CredentialSurfaceKind;
 
 export interface ExpectedIdentity {
   email?: string;
@@ -49,12 +57,22 @@ export interface AccountConfig {
   };
 }
 
-export interface CredentialSurfaceConfig {
+export interface CliCredentialSurfaceConfig {
   id: string;
-  kind: CredentialSurfaceKind;
+  kind: HeartbeatExecutor;
   home: string;
   executable: string;
 }
+
+export interface FireworksApiCredentialSurfaceConfig {
+  id: string;
+  kind: "fireworks-api";
+  credentialFile: string;
+}
+
+export type CredentialSurfaceConfig =
+  | CliCredentialSurfaceConfig
+  | FireworksApiCredentialSurfaceConfig;
 
 export interface AfterResetTriggerConfig {
   type: "after-reset";

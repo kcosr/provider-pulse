@@ -133,6 +133,88 @@ describe("parseConfig", () => {
 
     expect(() => parseConfig(config)).toThrow(/not valid for provider codex/);
   });
+
+  it("accepts a Fireworks API account with a stable remote account ID", () => {
+    const config = validConfig();
+    config.accounts = [{
+      id: "fireworks-personal",
+      label: "Fireworks personal",
+      provider: "fireworks",
+      expectedIdentity: { accountId: "account-one", email: "person@example.com" },
+      usageSource: {
+        adapter: "fireworks-api",
+        credentialSurfaceId: "fireworks-personal-api",
+      },
+    }];
+    config.credentialSurfaces = [{
+      id: "fireworks-personal-api",
+      kind: "fireworks-api",
+      credentialFile: "/tmp/fireworks-api-key",
+    }];
+
+    expect(parseConfig(config)).toMatchObject({
+      accounts: [{ provider: "fireworks" }],
+      credentialSurfaces: [{ kind: "fireworks-api" }],
+    });
+  });
+
+  it("requires a Fireworks account ID and matching API credential surface", () => {
+    const config = validConfig();
+    config.accounts = [{
+      id: "fireworks-personal",
+      label: "Fireworks personal",
+      provider: "fireworks",
+      expectedIdentity: { email: "person@example.com" },
+      usageSource: {
+        adapter: "fireworks-api",
+        credentialSurfaceId: "codex-primary-native",
+      },
+    }];
+
+    expect(() => parseConfig(config)).toThrow(/requires a fireworks-api|accountId/);
+  });
+
+  it("rejects heartbeat jobs for standalone Fireworks accounts", () => {
+    const config = validConfig();
+    config.accounts = [{
+      id: "fireworks-personal",
+      label: "Fireworks personal",
+      provider: "fireworks",
+      expectedIdentity: { accountId: "account-one" },
+      usageSource: {
+        adapter: "fireworks-api",
+        credentialSurfaceId: "fireworks-personal-api",
+      },
+    }];
+    config.credentialSurfaces = [
+      {
+        id: "fireworks-personal-api",
+        kind: "fireworks-api",
+        credentialFile: "/tmp/fireworks-api-key",
+      },
+      {
+        id: "pi-primary",
+        kind: "pi",
+        home: "/tmp/pi-primary",
+        executable: "pi",
+      },
+    ];
+    config.heartbeatJobs = [{
+      id: "fireworks-pi-heartbeat",
+      accountId: "fireworks-personal",
+      credentialSurfaceId: "pi-primary",
+      executor: "pi",
+      provider: "fireworks",
+      model: "model-one",
+      reasoning: "low",
+      prompt: "Reply OK.",
+      trigger: { type: "after-reset", windowId: "monthly-budget", offsetMinutes: 2 },
+      timeoutSeconds: 30,
+      enabled: true,
+    }];
+
+    expect(() => parseConfig(config)).toThrow(/do not support heartbeats/);
+  });
 });
 
 describe("loadConfig", () => {

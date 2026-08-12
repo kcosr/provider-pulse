@@ -190,7 +190,9 @@ describe("runtime validation", () => {
     const binaries = join(root, "bin");
     await Promise.all([mkdir(home), mkdir(binaries)]);
     await writeFile(join(binaries, "codex"), "#!/bin/sh\n", { mode: 0o700 });
-    config.credentialSurfaces[0]!.home = home;
+    const surface = config.credentialSurfaces[0]!;
+    if (surface.kind === "fireworks-api") throw new Error("Expected CLI surface");
+    surface.home = home;
 
     await expect(validateRuntimeDependencies(config, { environment: { PATH: binaries } })).resolves.toBeUndefined();
   });
@@ -201,8 +203,10 @@ describe("runtime validation", () => {
     const executable = join(root, "codex-secret-location");
     await writeFile(executable, "", { mode: 0o600 });
     await chmod(executable, 0o600);
-    config.credentialSurfaces[0]!.home = root;
-    config.credentialSurfaces[0]!.executable = executable;
+    const surface = config.credentialSurfaces[0]!;
+    if (surface.kind === "fireworks-api") throw new Error("Expected CLI surface");
+    surface.home = root;
+    surface.executable = executable;
 
     const error = await validateRuntimeDependencies(config).catch((reason: unknown) => reason);
     expect(error).toBeInstanceOf(RuntimeDependencyError);
@@ -215,8 +219,10 @@ describe("runtime validation", () => {
     const root = await mkdtemp(join(tmpdir(), "provider-pulse-runtime-"));
     const binary = join(root, "codex");
     await writeFile(binary, "#!/bin/sh\n", { mode: 0o700 });
-    config.credentialSurfaces[0]!.home = root;
-    config.credentialSurfaces[0]!.executable = binary;
+    const surface = config.credentialSurfaces[0]!;
+    if (surface.kind === "fireworks-api") throw new Error("Expected CLI surface");
+    surface.home = root;
+    surface.executable = binary;
     config.accounts[0]!.usageSource.adapter = "claude-tmux";
 
     await expect(validateRuntimeDependencies(config, { environment: { PATH: "" } })).rejects.toMatchObject({
@@ -225,13 +231,34 @@ describe("runtime validation", () => {
     });
   });
 
+  it("requires an owner-only Fireworks API credential file", async () => {
+    const config = await testConfig();
+    const root = await mkdtemp(join(tmpdir(), "provider-pulse-fireworks-runtime-"));
+    const credentialFile = join(root, "api-key");
+    await writeFile(credentialFile, "fw_test_key\n", { mode: 0o600 });
+    config.credentialSurfaces = [{
+      id: "fireworks-one-api",
+      kind: "fireworks-api",
+      credentialFile,
+    }];
+
+    await expect(validateRuntimeDependencies(config)).resolves.toBeUndefined();
+    await chmod(credentialFile, 0o644);
+    await expect(validateRuntimeDependencies(config)).rejects.toMatchObject({
+      surfaceId: "fireworks-one-api",
+      code: "credential_file_permissions_invalid",
+    });
+  });
+
   it("fails startup when Pi's offline catalog does not contain a configured provider/model", async () => {
     const config = await testConfig();
     const root = await mkdtemp(join(tmpdir(), "provider-pulse-runtime-"));
     const binary = join(root, "pi");
     await writeFile(binary, "#!/bin/sh\n", { mode: 0o700 });
-    config.credentialSurfaces[0]!.home = root;
-    config.credentialSurfaces[0]!.executable = binary;
+    const surface = config.credentialSurfaces[0]!;
+    if (surface.kind === "fireworks-api") throw new Error("Expected CLI surface");
+    surface.home = root;
+    surface.executable = binary;
     config.credentialSurfaces.push({ id: "pi-one", kind: "pi", home: root, executable: binary });
     config.heartbeatJobs.push({
       id: "pi-one-weekly",

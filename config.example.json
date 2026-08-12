@@ -26,6 +26,19 @@
         "adapter": "codex-app-server",
         "credentialSurfaceId": "codex-primary-native"
       }
+    },
+    {
+      "id": "fireworks-primary",
+      "label": "Fireworks primary",
+      "provider": "fireworks",
+      "expectedIdentity": {
+        "accountId": "example-account",
+        "email": "first@example.com"
+      },
+      "usageSource": {
+        "adapter": "fireworks-api",
+        "credentialSurfaceId": "fireworks-primary-api"
+      }
     }
   ],
   "credentialSurfaces": [
@@ -34,6 +47,11 @@
       "kind": "native-codex",
       "home": "/home/example/.local/share/provider-pulse/homes/codex-primary",
       "executable": "codex"
+    },
+    {
+      "id": "fireworks-primary-api",
+      "kind": "fireworks-api",
+      "credentialFile": "/home/example/.config/provider-pulse/fireworks-api-key"
     }
   ],
   "heartbeatJobs": []

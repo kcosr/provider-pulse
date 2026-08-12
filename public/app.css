@@ -233,6 +233,7 @@ h1 {
 .provider-icon.codex { color: #142019; background: #e6f0eb; }
 .provider-icon.claude { color: #efa981; background: #2d211c; }
 .provider-icon.grok { color: #b3beff; background: #1d2235; }
+.provider-icon.fireworks { color: #ffc68a; background: #332316; }
 
 .identity-copy { min-width: 0; }
 

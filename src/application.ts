@@ -8,6 +8,7 @@ import type { JsonlLogger } from "./log.js";
 import { runProcess } from "./process-runner.js";
 import { ClaudeUsageAdapter } from "./providers/claude.js";
 import { probeCodexUsage } from "./providers/codex.js";
+import { probeFireworksUsage } from "./providers/fireworks.js";
 import { GrokUsageAdapter } from "./providers/grok.js";
 import {
   calculateResetEligibleAt,
@@ -24,6 +25,7 @@ import {
 import type {
   AccountConfig,
   AppConfig,
+  CliCredentialSurfaceConfig,
   CredentialSurfaceConfig,
   ExpectedIdentity,
   HeartbeatJobConfig,
@@ -50,7 +52,7 @@ export type UsageProbe = (
 
 export type HeartbeatRunner = (
   job: HeartbeatJobConfig,
-  surface: CredentialSurfaceConfig,
+  surface: CliCredentialSurfaceConfig,
 ) => Promise<{ durationMs: number }>;
 
 export interface ApplicationDependencies {
@@ -67,7 +69,7 @@ export interface RuntimeValidationOptions {
   environment?: NodeJS.ProcessEnv;
   piModelCatalogProbe?: (
     job: Extract<HeartbeatJobConfig, { executor: "pi" }>,
-    surface: CredentialSurfaceConfig,
+    surface: CliCredentialSurfaceConfig,
   ) => Promise<boolean>;
 }
 
@@ -77,6 +79,30 @@ export async function validateRuntimeDependencies(
 ): Promise<void> {
   const environment = options.environment ?? process.env;
   for (const surface of config.credentialSurfaces) {
+    if (surface.kind === "fireworks-api") {
+      try {
+        const credential = await stat(surface.credentialFile);
+        if (!credential.isFile() || credential.size < 1 || credential.size > 4096) {
+          throw new Error("invalid credential file");
+        }
+        if ((credential.mode & 0o077) !== 0) {
+          throw new RuntimeDependencyError(
+            surface.id,
+            "credential_file_permissions_invalid",
+            "API credential file must be readable only by its owner",
+          );
+        }
+        await access(surface.credentialFile, constants.R_OK);
+      } catch (error) {
+        if (error instanceof RuntimeDependencyError) throw error;
+        throw new RuntimeDependencyError(
+          surface.id,
+          "credential_file_invalid",
+          "API credential file is unavailable or invalid",
+        );
+      }
+      continue;
+    }
     try {
       const home = await stat(surface.home);
       if (!home.isDirectory()) throw new Error("not a directory");
@@ -101,7 +127,7 @@ export async function validateRuntimeDependencies(
     if (job.executor !== "pi") continue;
     const surface = config.credentialSurfaces.find((candidate) => candidate.id === job.credentialSurfaceId);
     let available = false;
-    if (surface !== undefined) {
+    if (surface?.kind === "pi") {
       try {
         available = await piModelCatalogProbe(job, surface);
       } catch {
@@ -120,7 +146,7 @@ export async function validateRuntimeDependencies(
 
 async function probePiModelCatalog(
   job: Extract<HeartbeatJobConfig, { executor: "pi" }>,
-  surface: CredentialSurfaceConfig,
+  surface: CliCredentialSurfaceConfig,
   environment: NodeJS.ProcessEnv,
 ): Promise<boolean> {
   const result = await runProcess({
@@ -507,6 +533,12 @@ export class ProviderPulseApplication {
       }
 
       const surface = this.#requireSurface(job.credentialSurfaceId);
+      if (surface.kind === "fireworks-api") {
+        throw new ApplicationOperationError(
+          "heartbeat_config_invalid",
+          "API-only credential surfaces cannot run heartbeats",
+        );
+      }
       const result = await this.#withSurface(surface.id, () => this.#heartbeatRunner(job, surface));
       const completedAt = this.#now();
       this.#store.updateHeartbeat(job.id, (current) => ({
@@ -696,6 +728,7 @@ function createDefaultUsageRuntime(probeDirectory: string): DefaultUsageRuntime 
   const probe: UsageProbe = async (account, surface) => {
     switch (account.usageSource.adapter) {
       case "codex-app-server": {
+        if (surface.kind !== "native-codex") throw invalidUsageSurface(account.id);
         const value = await probeCodexUsage({ executable: surface.executable, home: surface.home });
         return {
           identity: compactIdentity({ email: value.identity.email, plan: value.identity.plan, authMethod: value.identity.authType }),
@@ -709,6 +742,7 @@ function createDefaultUsageRuntime(probeDirectory: string): DefaultUsageRuntime 
         };
       }
       case "claude-tmux": {
+        if (surface.kind !== "native-claude") throw invalidUsageSurface(account.id);
         const value = await claude.poll({ executable: surface.executable, home: surface.home, probeDirectory });
         return {
           identity: structuredClone(value.identity),
@@ -722,6 +756,7 @@ function createDefaultUsageRuntime(probeDirectory: string): DefaultUsageRuntime 
         };
       }
       case "grok-tmux": {
+        if (surface.kind !== "native-grok") throw invalidUsageSurface(account.id);
         const value = await grok.poll({ executable: surface.executable, home: surface.home, probeDirectory });
         return {
           identity: structuredClone(value.identity),
@@ -734,9 +769,35 @@ function createDefaultUsageRuntime(probeDirectory: string): DefaultUsageRuntime 
           implementationVersion: String(value.adapterVersion),
         };
       }
+      case "fireworks-api": {
+        if (surface.kind !== "fireworks-api") throw invalidUsageSurface(account.id);
+        const accountId = account.expectedIdentity?.accountId;
+        if (accountId === undefined) throw invalidUsageSurface(account.id);
+        const value = await probeFireworksUsage({
+          credentialFile: surface.credentialFile,
+          accountId,
+        });
+        return {
+          identity: structuredClone(value.identity),
+          snapshot: {
+            observedAt: value.observedAt,
+            windows: value.windows.map((window) => ({ ...window })),
+            balances: value.balances.map((balance) => ({ ...balance })),
+          },
+          implementation: value.adapter,
+          implementationVersion: String(value.adapterVersion),
+        };
+      }
     }
   };
   return { probe, cleanup: () => terminal.shutdown() };
+}
+
+function invalidUsageSurface(accountId: string): Error {
+  return new ApplicationOperationError(
+    "usage_surface_invalid",
+    `Configured usage surface is invalid for account ${accountId}`,
+  );
 }
 
 function normalizeCodexBalance(balance: {
@@ -869,11 +930,16 @@ export class ApplicationOperationError extends Error {
 
 export class RuntimeDependencyError extends Error {
   readonly surfaceId: string;
-  readonly code: "credential_home_invalid" | "executable_unavailable" | "pi_model_unavailable";
+  readonly code:
+    | "credential_file_invalid"
+    | "credential_file_permissions_invalid"
+    | "credential_home_invalid"
+    | "executable_unavailable"
+    | "pi_model_unavailable";
 
   constructor(
     surfaceId: string,
-    code: "credential_home_invalid" | "executable_unavailable" | "pi_model_unavailable",
+    code: RuntimeDependencyError["code"],
     message: string,
   ) {
     super(`Runtime validation failed for ${surfaceId}: ${message}`);

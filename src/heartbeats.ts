@@ -1,11 +1,11 @@
 import { ProcessRunError, runProcess } from "./process-runner.js";
 import type {
-  CredentialSurfaceConfig,
+  CliCredentialSurfaceConfig,
   HeartbeatExecutor,
   HeartbeatJobConfig,
 } from "./types.js";
 
-export type HeartbeatCredentialSurface = CredentialSurfaceConfig;
+export type HeartbeatCredentialSurface = CliCredentialSurfaceConfig;
 export type HeartbeatJobDefinition = HeartbeatJobConfig;
 
 export interface HeartbeatCommand {

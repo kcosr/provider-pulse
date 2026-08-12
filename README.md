@@ -5,8 +5,8 @@ subscription usage and keeping selected CLI credential surfaces active with
 minimal model heartbeats. It is independent of Harness: it never changes the
 credentials, sessions, targets, or rollout storage used by another app.
 
-The initial release supports Codex, Claude, and Grok. Fireworks is intentionally
-deferred; see [the Fireworks follow-up](docs/fireworks-follow-up.md).
+Provider Pulse supports Codex, Claude, Grok, and structured Fireworks account
+and quota polling. See [the Fireworks integration notes](docs/fireworks-follow-up.md).
 
 ## What it does
 
@@ -28,11 +28,16 @@ usage-history database and does not reconstruct dashboard status from its log.
 - tmux
 - The provider CLIs selected by the configuration (`codex`, `claude`, `grok`,
   and/or `pi`)
+- A Fireworks API key when a `fireworks-api` usage surface is configured
 - Linux with `systemd --user` for the optional service setup
 
 Codex polling uses its structured app-server protocol. Claude and Grok usage
 polling requires tmux because their usage data is currently exposed through
 interactive `/usage` screens rather than a suitable headless JSON command.
+Fireworks polling calls the official structured account and quota APIs. It
+shows account identity, health, monthly spend, and useful inference quotas.
+Fireworks does not expose a supported machine-readable prepaid credit balance,
+so that field is explicitly shown as unavailable rather than inferred.
 
 ## Install and verify
 
@@ -58,6 +63,7 @@ The recommended layout follows the XDG base-directory convention:
 | Rotating diagnostic log | `~/.local/state/provider-pulse/events.jsonl` |
 | Temporary probe working directory | `~/.local/state/provider-pulse/probes/` |
 | Isolated native and Pi credential homes | `~/.local/share/provider-pulse/homes/` |
+| Standalone Fireworks API key | `~/.config/provider-pulse/fireworks-api-key` |
 
 Create them with owner-only permissions:
 
@@ -99,6 +105,18 @@ PI_CODING_AGENT_DIR="$HOME/.local/share/provider-pulse/homes/pi-grok-primary" pi
 
 For Pi, use the interactive `/login` flow and select the intended provider,
 then exit. Configure that same directory as the Pi credential surface.
+
+For Fireworks, store one API key in a standalone owner-only file. This is not a
+Pi credential or heartbeat surface:
+
+```sh
+install -m 0600 /path/to/fireworks-api-key \
+  "$HOME/.config/provider-pulse/fireworks-api-key"
+```
+
+Configure a `fireworks-api` credential surface with that `credentialFile`, and
+pin its logical account with `expectedIdentity.accountId`. Provider Pulse reads
+the key for management API requests but never returns its contents or path.
 
 Do not copy OAuth files from an actively used CLI home into a monitoring home.
 Providers may rotate refresh tokens, so copied homes can invalidate one

@@ -27,7 +27,10 @@ const logger = new JsonlLogger({
     dirname(configPath),
     config.paths.stateDirectory,
     config.paths.probeDirectory,
-    ...config.credentialSurfaces.map((surface) => surface.home),
+    ...config.credentialSurfaces.flatMap((surface) =>
+      surface.kind === "fireworks-api"
+        ? [surface.credentialFile]
+        : [surface.home]),
   ],
 });
 const application = new ProviderPulseApplication(config, { logger });
