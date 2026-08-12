@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const POLL_INTERVAL_MS = 10_000;
+  const POLL_INTERVAL_MS = 60_000;
   const ACTION_REFRESH_MS = 800;
   const state = {
     status: null,
