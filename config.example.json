@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "server": {
+    "host": "127.0.0.1",
+    "port": 4317
+  },
+  "paths": {
+    "stateDirectory": "/home/example/.local/state/provider-pulse",
+    "probeDirectory": "/home/example/.local/state/provider-pulse/probes"
+  },
+  "polling": {
+    "automaticIntervalMinutes": null,
+    "startupCheck": true,
+    "maxConcurrency": 2,
+    "staleAfterMinutes": 240
+  },
+  "accounts": [
+    {
+      "id": "codex-primary",
+      "label": "Codex primary",
+      "provider": "codex",
+      "expectedIdentity": {
+        "email": "first@example.com"
+      },
+      "usageSource": {
+        "adapter": "codex-app-server",
+        "credentialSurfaceId": "codex-primary-native"
+      }
+    }
+  ],
+  "credentialSurfaces": [
+    {
+      "id": "codex-primary-native",
+      "kind": "native-codex",
+      "home": "/home/example/.local/share/provider-pulse/homes/codex-primary",
+      "executable": "codex"
+    }
+  ],
+  "heartbeatJobs": []
+}

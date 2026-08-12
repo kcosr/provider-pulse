@@ -1,0 +1,27 @@
+{
+  "name": "provider-pulse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local multi-provider usage and heartbeat monitor",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "prebuild": "node scripts/clean-dist.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-public.mjs",
+    "dev": "npm run build && node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "test": "vitest run --exclude 'dist/**'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "fastify": "5.11.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

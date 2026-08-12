@@ -1,0 +1,22 @@
+[Unit]
+Description=Provider Pulse local usage monitor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/worktrees/provider-pulse
+Environment=PROVIDER_PULSE_CONFIG=%h/.config/provider-pulse/config.json
+ExecStart=/usr/bin/env node %h/worktrees/provider-pulse/dist/main.js
+Restart=on-failure
+RestartSec=5s
+# Heartbeats may have a configured timeout of up to 900 seconds. Leave enough
+# time to stop scheduling, await an in-flight request, and clean private tmux.
+TimeoutStopSec=930s
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,10 @@
+Grok Code 1.0.0
+
+  Usage
+
+  Weekly limit: 28%
+  Next reset: August 13, 01:31
+
+  Session usage unavailable: no model calls have been made in this session.
+
+❯

@@ -1,0 +1,21 @@
+Claude Code 2.1.0
+
+  Usage
+
+  Current session
+  ████████████████████ 24% used
+  Resets in 3 hr 15 min
+
+  Current week (all models)
+  ████████████████████ 61% used
+  Resets Aug 15, 2026 at 2:00 AM
+
+  Current week (Fable 5 only)
+  ████████████████████ 7% used
+  Resets Aug 16, 2026 at 4:30 PM
+
+  Current week (Sonnet only)
+  ████████████████████ 12% used
+  Resets Aug 17, 2026 at 6:00 PM
+
+❯

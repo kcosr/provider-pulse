@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0b0f0e">
+    <title>Provider Pulse</title>
+    <link rel="stylesheet" href="/app.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#accounts">Skip to accounts</a>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <div>
+            <h1>Provider Pulse</h1>
+            <p class="subtitle" id="updated">Waiting for status…</p>
+          </div>
+        </div>
+        <div class="global-actions">
+          <div class="health-pill unknown" id="overallHealth" role="status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span>Unknown</span>
+          </div>
+          <button class="button" id="checkAll" type="button">Check all</button>
+          <button class="button heartbeat" id="heartbeatAll" type="button">Heartbeat all</button>
+        </div>
+      </header>
+
+      <div class="notice" id="notice" role="alert" hidden></div>
+      <section class="account-grid" id="accounts" aria-label="Provider accounts" aria-busy="true"></section>
+
+      <footer class="page-footer">
+        <span><span class="live-dot" aria-hidden="true"></span>Local status · refreshes every 10 seconds</span>
+        <span id="apiState">Connecting</span>
+      </footer>
+      <div class="sr-only" id="announcer" aria-live="polite" aria-atomic="true"></div>
+    </main>
+  </body>
+</html>

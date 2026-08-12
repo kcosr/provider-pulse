@@ -1,0 +1,11 @@
+Grok Code 1.0.0
+
+  Usage
+
+  Weekly limit
+  ████████████████████ 42% used
+  Resets Aug 18, 2026 at 2:41 AM
+
+  This session has made no model calls.
+
+❯

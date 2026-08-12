@@ -1,0 +1,249 @@
+# Provider Pulse
+
+Provider Pulse is a small, standalone local web application for checking LLM
+subscription usage and keeping selected CLI credential surfaces active with
+minimal model heartbeats. It is independent of Harness: it never changes the
+credentials, sessions, targets, or rollout storage used by another app.
+
+The initial release supports Codex, Claude, and Grok. Fireworks is intentionally
+deferred; see [the Fireworks follow-up](docs/fireworks-follow-up.md).
+
+## What it does
+
+- Shows every configured account under an operator-chosen label.
+- Reports all provider usage windows it can observe, including reset times.
+- Compares an optional expected email with the identity observed by the CLI.
+- Records the current usage-poll and heartbeat health in memory.
+- Runs per-account or bulk usage checks from the web page.
+- Runs manual or reset-aware native-CLI and Pi heartbeats.
+- Exposes one normalized JSON status object at `GET /api/status`.
+- Writes bounded diagnostic JSONL logs and only the minimal scheduler cursor.
+
+Status starts as unknown after every process restart. Provider Pulse is not a
+usage-history database and does not reconstruct dashboard status from its log.
+
+## Requirements
+
+- Node.js 22.12 or newer
+- tmux
+- The provider CLIs selected by the configuration (`codex`, `claude`, `grok`,
+  and/or `pi`)
+- Linux with `systemd --user` for the optional service setup
+
+Codex polling uses its structured app-server protocol. Claude and Grok usage
+polling requires tmux because their usage data is currently exposed through
+interactive `/usage` screens rather than a suitable headless JSON command.
+
+## Install and verify
+
+```sh
+npm ci --ignore-scripts
+npm run typecheck
+npm test
+npm run build
+```
+
+Tests use fake provider processes and do not send model requests. A real
+heartbeat always consumes provider capacity and can start or advance a quota
+window; do not use a heartbeat as an installation test.
+
+## Local directories
+
+The recommended layout follows the XDG base-directory convention:
+
+| Purpose | Default location |
+| --- | --- |
+| Operator configuration | `~/.config/provider-pulse/config.json` |
+| Scheduler cursor | `~/.local/state/provider-pulse/scheduler-state.json` |
+| Rotating diagnostic log | `~/.local/state/provider-pulse/events.jsonl` |
+| Temporary probe working directory | `~/.local/state/provider-pulse/probes/` |
+| Isolated native and Pi credential homes | `~/.local/share/provider-pulse/homes/` |
+
+Create them with owner-only permissions:
+
+```sh
+install -d -m 0700 "$HOME/.config/provider-pulse"
+install -d -m 0700 "$HOME/.local/state/provider-pulse/probes"
+install -d -m 0700 "$HOME/.local/share/provider-pulse/homes"
+install -m 0600 config.example.json "$HOME/.config/provider-pulse/config.json"
+```
+
+Edit `config.json` before starting the service. The schema is strict: unknown
+fields, duplicate IDs, bad cross-references, invalid executables, and invalid
+home paths fail startup instead of being silently ignored. The committed
+`config.example.json` is synthetic and safe to copy as a starting point.
+
+Each account label is configured explicitly. Labels such as `primary`,
+`backup`, or `personal 2` are not inferred from an email address. The optional
+`expectedIdentity.email` detects when the credential in a home has been
+replaced; a mismatch blocks heartbeats but remains visible in usage status.
+
+## Provision isolated credentials
+
+Provider Pulse delegates login to the CLI that owns each credential store. Give
+each surface its own directory and authenticate it directly:
+
+```sh
+install -d -m 0700 "$HOME/.local/share/provider-pulse/homes/codex-primary"
+CODEX_HOME="$HOME/.local/share/provider-pulse/homes/codex-primary" codex login
+
+install -d -m 0700 "$HOME/.local/share/provider-pulse/homes/claude-primary"
+CLAUDE_CONFIG_DIR="$HOME/.local/share/provider-pulse/homes/claude-primary" claude auth login
+
+install -d -m 0700 "$HOME/.local/share/provider-pulse/homes/grok-primary"
+GROK_HOME="$HOME/.local/share/provider-pulse/homes/grok-primary" grok login
+
+install -d -m 0700 "$HOME/.local/share/provider-pulse/homes/pi-grok-primary"
+PI_CODING_AGENT_DIR="$HOME/.local/share/provider-pulse/homes/pi-grok-primary" pi
+```
+
+For Pi, use the interactive `/login` flow and select the intended provider,
+then exit. Configure that same directory as the Pi credential surface.
+
+Do not copy OAuth files from an actively used CLI home into a monitoring home.
+Providers may rotate refresh tokens, so copied homes can invalidate one
+another. Log into each isolated home separately. A native credential and a Pi
+credential remain separate even when both represent the same provider account;
+a heartbeat through one does not refresh the other.
+
+When `expectedIdentity` is configured, Provider Pulse can verify only the
+credential surface used by that account's usage source. A heartbeat configured
+on a different native or Pi home is blocked with
+`heartbeat_identity_unverifiable`; omit `expectedIdentity` only when you
+intentionally trust that separately provisioned surface without an identity
+assertion.
+
+## Configuration model
+
+The top-level configuration defines:
+
+- `server`: loopback host and port;
+- `paths`: state and probe directories;
+- `polling`: startup behavior, optional low-frequency polling, concurrency,
+  and freshness;
+- `credentialSurfaces`: executable plus isolated home for each native CLI or
+  Pi credential;
+- `accounts`: labels, expected identity, and usage adapter;
+- `heartbeatJobs`: the exact account, credential surface, executor, provider,
+  model, reasoning, prompt, timeout, and trigger.
+
+Browser requests contain only configured account or heartbeat IDs. Executable
+paths, homes, environment variables, models, prompts, and arguments are never
+accepted from the browser.
+
+At startup, every configured Pi heartbeat provider/model pair is checked
+against that Pi home's local model catalog in offline mode. A missing pair
+fails startup; the catalog check does not send an inference request.
+
+Usage polling and heartbeat execution are separate operations. General polling
+is manual-first. A reset-aware heartbeat selects a normalized usage window and
+runs once after the observed reset plus its configured offset. The internal
+minute timer only compares timestamps; it makes no provider request.
+
+## Run locally
+
+```sh
+npm run build
+PROVIDER_PULSE_CONFIG="$HOME/.config/provider-pulse/config.json" npm start
+```
+
+The default page is <http://127.0.0.1:4317>. Provider Pulse should remain bound
+to loopback; it has no remote-user authentication layer.
+
+## HTTP API
+
+Reading status is side-effect-free:
+
+```text
+GET /api/status
+```
+
+The response is one normalized JSON object containing overall health, account
+identity and usage windows, the most recent usage-poll result, and all heartbeat
+job states. It never starts a CLI, refreshes a token, or sends a model request.
+
+Actions are started with:
+
+```text
+POST /api/accounts/:accountId/check
+POST /api/check-all
+POST /api/heartbeats/:heartbeatId/run
+POST /api/heartbeat-all
+```
+
+Actions return operation receipts promptly. Poll `GET /api/status` to observe
+progress and the final per-operation result. Duplicate checks are coalesced and
+operations sharing a credential surface are serialized. Bulk actions preserve
+individual outcomes.
+
+The web page exposes the same per-card and bulk actions. Heartbeats deliberately
+have no confirmation modal, so treat the buttons as real quota-consuming
+actions. Failed or timed-out heartbeats are not automatically retried because
+the provider may have accepted a request whose response was lost.
+
+## How terminal usage polling works
+
+Tmux supplies both the pseudo-terminal and terminal emulation. Provider Pulse
+starts a uniquely named detached session with fixed dimensions and safe CLI
+flags, waits for the prompt, sends literal `/usage` and Enter as separate key
+operations, and polls `tmux capture-pane`. `capture-pane` reconstructs the
+visible terminal text, so the parser reads a screen rather than raw ANSI escape
+sequences from a pipe. After stable provider-specific completion markers are
+seen, the text is parsed and the exact session is destroyed in a `finally`
+cleanup path.
+
+All subprocesses use argument arrays with shell expansion disabled and enforce
+startup, response, output-size, and total time limits. Tmux is behind a small
+terminal-probe boundary, so a future implementation could replace it with
+`node-pty` plus a headless terminal emulator. Tmux is simpler here because it
+already provides both pieces and exposes reconstructed text through
+`capture-pane`.
+
+Claude polling combines `claude auth status --json` identity data with the TUI
+usage screen. Grok polling can leave an empty resumable native session even
+though it sends no model prompt; that is a current CLI limitation.
+
+## Run as a user service
+
+Review [the service example](deploy/provider-pulse.service.example), especially
+its checkout path, then install and start it:
+
+```sh
+install -D -m 0644 deploy/provider-pulse.service.example \
+  "$HOME/.config/systemd/user/provider-pulse.service"
+systemctl --user daemon-reload
+systemctl --user enable --now provider-pulse.service
+systemctl --user status provider-pulse.service
+```
+
+The example resolves `node` through the user manager's `PATH`. If Node was
+installed in a private location, replace `/usr/bin/env node` in `ExecStart`
+with the absolute path reported by `command -v node`.
+
+The long stop timeout is intentional: heartbeat jobs may run for up to their
+configured 900-second limit. Graceful shutdown stops the reset scheduler, waits
+for in-flight work, and then removes only Provider Pulse's private tmux server
+and probes.
+
+Inspect logs with:
+
+```sh
+journalctl --user -u provider-pulse.service -f
+```
+
+Restart the service after changing `config.json`. Dashboard status returns to
+unknown and configured startup checks repopulate it. The small scheduler cursor
+prevents duplicate post-reset heartbeats across restarts; diagnostic JSONL is
+for troubleshooting only and is not replayed.
+
+## Security notes
+
+- Keep configuration, credential homes, state, and logs readable only by the
+  local owner.
+- Never put access tokens, refresh tokens, cookies, API keys, or auth-file
+  contents in labels, prompts, or expected identity fields.
+- Do not point monitoring surfaces at credential homes used concurrently by
+  other applications.
+- Keep the HTTP listener on `127.0.0.1`.
+- A heartbeat is a real provider request. It can consume paid capacity, start a
+  reset window, refresh a credential, and create a small provider-side session.
