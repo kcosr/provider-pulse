@@ -74,10 +74,10 @@
   function resetText(value) {
     const date = dateValue(value);
     if (!date) return "reset unavailable";
-    const difference = date.getTime() - Date.now();
-    if (difference > 0 && difference < 36 * 3_600_000) return `resets ${relativeTime(date)}`;
     return `resets ${new Intl.DateTimeFormat(undefined, {
       weekday: "short",
+      month: "numeric",
+      day: "numeric",
       hour: "numeric",
       minute: "2-digit",
     }).format(date)}`;

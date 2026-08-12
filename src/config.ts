@@ -16,6 +16,15 @@ const idSchema = z
   .min(1)
   .max(96)
   .regex(/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/, "must be a stable lowercase ID");
+const usageWindowIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(160)
+  .regex(
+    /^[a-z0-9](?:[a-z0-9._:-]*[a-z0-9])?$/,
+    "must be a normalized usage-window ID",
+  );
 const labelSchema = z.string().trim().min(1).max(120);
 const absolutePathSchema = z
   .string()
@@ -61,7 +70,7 @@ const credentialSurfaceSchema = z.strictObject({
 
 const triggerSchema = z.strictObject({
   type: z.literal("after-reset"),
-  windowId: idSchema,
+  windowId: usageWindowIdSchema,
   offsetMinutes: z.number().int().min(0).max(1440),
 });
 

@@ -46,6 +46,24 @@ describe("parseConfig", () => {
     expect(parseConfig(validConfig())).toMatchObject({ version: 1, accounts: [{ id: "codex-primary" }] });
   });
 
+  it("accepts namespaced normalized usage-window IDs", () => {
+    const config = validConfig();
+    config.heartbeatJobs = [{
+      id: "codex-primary-reset",
+      accountId: "codex-primary",
+      credentialSurfaceId: "codex-primary-native",
+      executor: "native-codex",
+      model: "gpt-5.3-codex",
+      reasoning: "low",
+      prompt: "Reply OK.",
+      trigger: { type: "after-reset", windowId: "codex:primary", offsetMinutes: 2 },
+      timeoutSeconds: 120,
+      enabled: true,
+    }];
+
+    expect(parseConfig(config).heartbeatJobs[0]?.trigger.windowId).toBe("codex:primary");
+  });
+
   it("rejects unknown fields", () => {
     expect(() => parseConfig({ ...validConfig(), ignored: true })).toThrow(/Unrecognized key/);
   });
