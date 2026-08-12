@@ -19,7 +19,10 @@ export interface ResetVerification {
 }
 
 export interface ResetSchedulerCallbacks {
-  refreshUsage(job: ResetAwareJob): Promise<ResetVerification>;
+  refreshUsage(
+    job: ResetAwareJob,
+    eligibleResetAt: string,
+  ): Promise<ResetVerification>;
   runHeartbeat(job: ResetAwareJob): Promise<void>;
 }
 
@@ -191,7 +194,7 @@ export class ResetAwareScheduler {
       this.#attemptedResets.set(job.id, eligibleResetAt);
       let verification: ResetVerification;
       try {
-        verification = await this.#callbacks.refreshUsage(job);
+        verification = await this.#callbacks.refreshUsage(job, eligibleResetAt);
       } catch (error: unknown) {
         results.push({ jobId: job.id, resetAt: eligibleResetAt, outcome: "verification_failed", error });
         continue;
@@ -229,7 +232,7 @@ export class ResetAwareScheduler {
       }
 
       try {
-        const refreshed = await this.#callbacks.refreshUsage(job);
+        const refreshed = await this.#callbacks.refreshUsage(job, eligibleResetAt);
         if (refreshed.identityMatches && refreshed.resetAt !== null) {
           await this.#observeReset(job.id, refreshed.resetAt, {});
         }

@@ -233,10 +233,13 @@ function buildArguments(job: HeartbeatJobDefinition): readonly string[] {
         "json",
         "--permission-mode",
         "plan",
+        // --mcp-config is variadic in Claude Code. Keep the positional prompt
+        // before it so the CLI cannot interpret the prompt as another config
+        // file path.
+        job.prompt,
         "--strict-mcp-config",
         "--mcp-config",
         '{"mcpServers":{}}',
-        job.prompt,
       ];
     case "native-grok":
       return [

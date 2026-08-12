@@ -114,10 +114,10 @@ describe("buildHeartbeatCommand", () => {
       "json",
       "--permission-mode",
       "plan",
+      "Reply with exactly OK.",
       "--strict-mcp-config",
       "--mcp-config",
       '{"mcpServers":{}}',
-      "Reply with exactly OK.",
     ]);
     expect(command.env.CLAUDE_CONFIG_DIR).toBe(
       "/credentials/native-claude",

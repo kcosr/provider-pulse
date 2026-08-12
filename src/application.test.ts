@@ -10,6 +10,7 @@ import {
   validateRuntimeDependencies,
   type UsageProbeResult,
 } from "./application.js";
+import { writeSchedulerCursorAtomic } from "./scheduler-state.js";
 import type { AppConfig, UsageWindow } from "./types.js";
 
 describe("ProviderPulseApplication", () => {
@@ -119,6 +120,73 @@ describe("ProviderPulseApplication", () => {
     expect(app.getStatus().heartbeats[0]).toMatchObject({ health: "unknown" });
     expect(app.getStatus().heartbeats[0]).not.toHaveProperty("error");
     await app.close();
+  });
+
+  it("runs a due reset heartbeat without deadlocking on scheduler usage observations", async () => {
+    const config = await testConfig(true);
+    const resetAt = "2026-08-13T06:31:00.000Z";
+    const usageProbe = vi.fn(async () => successfulUsage("person@example.com", [{
+      id: "weekly",
+      label: "Weekly",
+      resetsAt: resetAt,
+    }]));
+    const heartbeatRunner = vi.fn(async () => ({ durationMs: 2 }));
+    const app = new ProviderPulseApplication(config, {
+      usageProbe,
+      heartbeatRunner,
+      now: () => new Date("2026-08-13T06:34:00.000Z"),
+      schedulerTickIntervalMilliseconds: 5,
+    });
+
+    await app.initialize();
+    await vi.waitFor(() => expect(heartbeatRunner).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(app.getStatus().heartbeats[0]).toMatchObject({
+      health: "healthy",
+      inFlight: false,
+      nextEligibleAt: "2026-08-13T06:33:00.000Z",
+    }));
+    await app.close();
+
+    expect(usageProbe.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(heartbeatRunner).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a fully reset inactive window as eligible instead of unhealthy", async () => {
+    const config = await testConfig(true);
+    const resetAt = "2026-08-13T06:31:00.000Z";
+    await writeSchedulerCursorAtomic(join(config.paths.stateDirectory, "scheduler-state.json"), {
+      version: 1,
+      jobs: {
+        "codex-one-native-weekly": {
+          lastObservedResetAt: resetAt,
+          lastHandledResetAt: null,
+        },
+      },
+    });
+    const usageProbe = vi.fn(async () => successfulUsage("person@example.com", [{
+      id: "weekly",
+      label: "Weekly",
+      usedPercent: 0,
+      remainingPercent: 100,
+    }]));
+    const heartbeatRunner = vi.fn(async () => ({ durationMs: 2 }));
+    const app = new ProviderPulseApplication(config, {
+      usageProbe,
+      heartbeatRunner,
+      now: () => new Date("2026-08-13T06:34:00.000Z"),
+      schedulerTickIntervalMilliseconds: 5,
+    });
+
+    await app.initialize();
+    await vi.waitFor(() => expect(heartbeatRunner).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(app.getStatus().heartbeats[0]).toMatchObject({
+      health: "healthy",
+      inFlight: false,
+    }));
+    expect(app.getStatus().heartbeats[0]).not.toHaveProperty("error");
+    await app.close();
+
+    expect(heartbeatRunner).toHaveBeenCalledTimes(1);
   });
 
   it("serializes usage and heartbeat work on the same credential surface", async () => {

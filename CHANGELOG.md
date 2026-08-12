@@ -5,7 +5,15 @@ All notable changes to Provider Pulse are documented here. The project follows
 
 ## Unreleased
 
-No user-visible changes yet.
+### Fixed
+
+- Prevented reset-aware scheduler verification polls from deadlocking when
+  they report their observed reset back to the scheduler mutation queue.
+- Treated fully reset, inactive provider windows without a reset timestamp as
+  eligible for their already-observed reset instead of reporting them as
+  unhealthy.
+- Placed Claude's positional heartbeat prompt before the variadic
+  `--mcp-config` option so it is not misread as a configuration filename.
 
 ## 0.1.0 - 2026-08-12
 

@@ -240,6 +240,7 @@ export class ProviderPulseApplication {
   readonly #jobs: ReadonlyMap<string, HeartbeatJobConfig>;
   readonly #usageOperations = new Map<string, RunningUsageOperation>();
   readonly #heartbeatOperations = new Map<string, RunningOperation>();
+  readonly #resetObservationOperations = new Set<Promise<void>>();
   readonly #surfaceTails = new Map<string, Promise<void>>();
   readonly #usageWaiters: Array<() => void> = [];
   readonly #scheduler: ResetAwareScheduler;
@@ -279,7 +280,8 @@ export class ProviderPulseApplication {
       jobs: schedulerJobs,
       stateFile: join(config.paths.stateDirectory, "scheduler-state.json"),
       callbacks: {
-        refreshUsage: async (job) => this.#refreshForScheduler(job),
+        refreshUsage: async (job, eligibleResetAt) =>
+          this.#refreshForScheduler(job, eligibleResetAt),
         runHeartbeat: async (job) => this.#runHeartbeatForScheduler(job),
       },
       now: this.#now,
@@ -403,6 +405,7 @@ export class ProviderPulseApplication {
       ...[...this.#heartbeatOperations.values()].map((operation) => operation.promise),
     ];
     await Promise.allSettled(active);
+    await this.#drainResetObservations();
     await this.#terminalCleanup?.().catch(() => undefined);
   }
 
@@ -455,7 +458,11 @@ export class ProviderPulseApplication {
         },
       }));
       const markFreshObservation = this.#usageOperations.get(account.id)?.markFreshObservation ?? false;
-      await this.#observeAccountResets(account.id, result.snapshot.windows, markFreshObservation);
+      this.#scheduleAccountResetObservation(
+        account.id,
+        result.snapshot.windows,
+        markFreshObservation,
+      );
       await this.#log({
         operationId,
         kind: "usage-check",
@@ -592,7 +599,10 @@ export class ProviderPulseApplication {
     }
   }
 
-  async #refreshForScheduler(job: ResetAwareJob): Promise<SchedulerObservation> {
+  async #refreshForScheduler(
+    job: ResetAwareJob,
+    eligibleResetAt: string,
+  ): Promise<SchedulerObservation> {
     const check = this.#startUsageCheck(this.#requireAccount(job.accountId), false);
     await this.#usageOperations.get(job.accountId)?.promise;
     void check;
@@ -600,7 +610,11 @@ export class ProviderPulseApplication {
     const window = account?.usage.snapshot?.windows.find((candidate) => candidate.id === job.windowId);
     return {
       identityMatches: account?.usage.identity.match !== "mismatched",
-      resetAt: window?.resetsAt ?? null,
+      // Claude omits resetsAt after a five-hour window has fully reset and is
+      // inactive. The scheduler already persisted the reset it is verifying,
+      // so a fully remaining window confirms that reset instead of blocking
+      // the configured heartbeat that starts the next provider window.
+      resetAt: window?.resetsAt ?? (isInactiveUsageWindow(window) ? eligibleResetAt : null),
     };
   }
 
@@ -633,6 +647,21 @@ export class ProviderPulseApplication {
       const window = windows.find((candidate) => candidate.id === job.trigger.windowId);
       const resetAt = window?.resetsAt;
       if (resetAt === undefined) {
+        if (isInactiveUsageWindow(window)) {
+          this.#store.updateHeartbeat(job.id, (current) => {
+            const { nextEligibleAt: _nextEligibleAt, ...withoutNextEligibleAt } = current;
+            if (!isResetObservationError(current.error)) return withoutNextEligibleAt;
+            return {
+              ...withoutError(withoutNextEligibleAt),
+              health: current.inFlight
+                ? "running" as const
+                : current.lastSuccessAt === undefined
+                  ? "unknown" as const
+                  : "healthy" as const,
+            };
+          });
+          continue;
+        }
         const code = window === undefined
           ? "heartbeat_reset_window_unavailable"
           : "heartbeat_reset_time_unavailable";
@@ -666,6 +695,61 @@ export class ProviderPulseApplication {
           : current),
         nextEligibleAt: calculateResetEligibleAt(resetAt, job.trigger.offsetMinutes).toISOString(),
       }));
+    }
+  }
+
+  #scheduleAccountResetObservation(
+    accountId: string,
+    windows: readonly UsageWindow[],
+    markFreshObservation: boolean,
+  ): void {
+    // A scheduler tick calls back into usage polling while it owns the
+    // scheduler mutation queue. Feeding that poll's reset snapshot back into
+    // the same queue synchronously would deadlock the tick. Queue the
+    // observation independently; the tick already receives the verified reset
+    // directly from #refreshForScheduler and reconciles it before execution.
+    const attemptedAt = this.#now();
+    const operationId = this.#createOperationId();
+    const operation = this.#observeAccountResets(
+      accountId,
+      windows,
+      markFreshObservation,
+    ).catch(async (error: unknown) => {
+      const completedAt = this.#now();
+      const normalized = normalizeError(error, "scheduler_observation_failed");
+      for (const job of this.#jobs.values()) {
+        if (!job.enabled || job.accountId !== accountId) continue;
+        this.#store.updateHeartbeat(job.id, (current) => {
+          if (current.error !== undefined && !isResetObservationError(current.error)) {
+            return current;
+          }
+          return {
+            ...current,
+            health: current.inFlight ? "running" : "unhealthy",
+            error: normalized,
+          };
+        });
+      }
+      await this.#log({
+        operationId,
+        kind: "system",
+        accountId,
+        outcome: "scheduler_observation_failure",
+        attemptedAt: attemptedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        durationMs: Math.max(0, completedAt.getTime() - attemptedAt.getTime()),
+        error: normalized,
+      });
+    });
+    this.#resetObservationOperations.add(operation);
+    void operation.finally(() => {
+      this.#resetObservationOperations.delete(operation);
+    });
+  }
+
+  async #drainResetObservations(): Promise<void> {
+    while (this.#resetObservationOperations.size > 0) {
+      await Promise.all([...this.#resetObservationOperations]);
     }
   }
 
@@ -929,6 +1013,12 @@ function identityMismatchError(): StatusError {
 function isResetObservationError(error: StatusError | undefined): boolean {
   return error?.code === "heartbeat_reset_window_unavailable" ||
     error?.code === "heartbeat_reset_time_unavailable";
+}
+
+function isInactiveUsageWindow(window: UsageWindow | undefined): boolean {
+  return window !== undefined &&
+    window.resetsAt === undefined &&
+    (window.remainingPercent === 100 || window.usedPercent === 0);
 }
 
 function receipt(
