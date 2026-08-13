@@ -203,6 +203,7 @@ describe("ProviderPulseApplication", () => {
     const usageProbe = vi.fn(async () => successfulUsage("person@example.com", [{
       id: "weekly",
       label: "Weekly",
+      durationMinutes: 10_080,
       resetsAt: resetAt,
     }]));
     const heartbeatRunner = vi.fn(async () => ({ durationMs: 2 }));
@@ -218,8 +219,11 @@ describe("ProviderPulseApplication", () => {
     await vi.waitFor(() => expect(app.getStatus().heartbeats[0]).toMatchObject({
       health: "healthy",
       inFlight: false,
-      nextEligibleAt: "2026-08-13T06:33:00.000Z",
     }));
+    await vi.waitFor(
+      () => expect(app.getStatus().heartbeats[0]?.nextEligibleAt).toBe("2026-08-20T06:36:00.000Z"),
+      { timeout: 3_000 },
+    );
     await app.close();
 
     expect(usageProbe.mock.calls.length).toBeGreaterThanOrEqual(3);
@@ -243,6 +247,7 @@ describe("ProviderPulseApplication", () => {
       label: "Weekly",
       usedPercent: 0,
       remainingPercent: 100,
+      durationMinutes: 300,
     }]));
     const heartbeatRunner = vi.fn(async () => ({ durationMs: 2 }));
     const app = new ProviderPulseApplication(config, {
@@ -259,6 +264,7 @@ describe("ProviderPulseApplication", () => {
       inFlight: false,
     }));
     expect(app.getStatus().heartbeats[0]).not.toHaveProperty("error");
+    expect(app.getStatus().heartbeats[0]?.nextEligibleAt).toBe("2026-08-13T11:36:00.000Z");
     await app.close();
 
     expect(heartbeatRunner).toHaveBeenCalledTimes(1);

@@ -156,6 +156,79 @@ describe("ResetAwareScheduler", () => {
     });
   });
 
+  it("estimates the next reset from duration when the post-heartbeat poll omits it", async () => {
+    const path = await statePath();
+    const refreshUsage = vi
+      .fn<() => Promise<ResetVerification>>()
+      .mockResolvedValueOnce({
+        identityMatches: true,
+        resetAt: "2026-08-13T06:31:00Z",
+        durationMinutes: 300,
+      })
+      .mockResolvedValueOnce({
+        identityMatches: true,
+        resetAt: null,
+        durationMinutes: 300,
+      });
+    const scheduler = createScheduler({ path, refreshUsage });
+    await scheduler.initialize();
+    await scheduler.observeReset("weekly-job", "2026-08-13T06:31:00Z");
+
+    expect(await scheduler.tick()).toMatchObject([{
+      outcome: "heartbeat_succeeded_estimated_reset",
+    }]);
+    expect(scheduler.snapshot().jobs["weekly-job"]).toEqual({
+      lastObservedResetAt: "2026-08-13T11:34:00.000Z",
+      lastHandledResetAt: "2026-08-13T06:31:00.000Z",
+    });
+  });
+
+  it("retains a duration estimate when the post-heartbeat poll fails", async () => {
+    const path = await statePath();
+    const refreshUsage = vi
+      .fn<() => Promise<ResetVerification>>()
+      .mockResolvedValueOnce({
+        identityMatches: true,
+        resetAt: "2026-08-13T06:31:00Z",
+        durationMinutes: 10_080,
+      })
+      .mockRejectedValueOnce(new Error("provider unavailable"));
+    const scheduler = createScheduler({ path, refreshUsage });
+    await scheduler.initialize();
+    await scheduler.observeReset("weekly-job", "2026-08-13T06:31:00Z");
+
+    expect(await scheduler.tick()).toMatchObject([{
+      outcome: "heartbeat_succeeded_refresh_failed",
+    }]);
+    expect(scheduler.snapshot().jobs["weekly-job"]).toEqual({
+      lastObservedResetAt: "2026-08-20T06:34:00.000Z",
+      lastHandledResetAt: "2026-08-13T06:31:00.000Z",
+    });
+  });
+
+  it("recovers a next reset from a handled cursor without overwriting newer state", async () => {
+    const path = await statePath();
+    const scheduler = createScheduler({ path });
+    await scheduler.initialize();
+    await scheduler.observeReset("weekly-job", "2026-08-13T06:31:00Z");
+    await scheduler.tick();
+
+    expect(await scheduler.estimateNextResetFromHandled("weekly-job", 10_080)).toBe(
+      "2026-08-20T06:33:00.000Z",
+    );
+    expect(await scheduler.estimateNextResetFromHandled("weekly-job", 10_080)).toBeNull();
+    expect(scheduler.snapshot().jobs["weekly-job"]).toEqual({
+      lastObservedResetAt: "2026-08-20T06:33:00.000Z",
+      lastHandledResetAt: "2026-08-13T06:31:00.000Z",
+    });
+    await scheduler.observeReset("weekly-job", "2026-08-13T06:31:00Z", {
+      markFreshObservation: true,
+    });
+    expect(scheduler.snapshot().jobs["weekly-job"]?.lastObservedResetAt).toBe(
+      "2026-08-20T06:33:00.000Z",
+    );
+  });
+
   it("coalesces concurrent timer ticks", async () => {
     const path = await statePath();
     let release: (() => void) | undefined;

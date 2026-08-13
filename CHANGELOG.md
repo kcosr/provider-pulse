@@ -16,6 +16,10 @@ All notable changes to Provider Pulse are documented here. The project follows
 
 ### Fixed
 
+- Reset-aware heartbeats now retain a duration-based next-reset estimate when
+  the immediate post-heartbeat usage poll omits or fails to return `resetsAt`.
+  Later provider timestamps replace the estimate, and startup repairs handled
+  inactive windows without overwriting newer scheduler state.
 - Prevented reset-aware scheduler verification polls from deadlocking when
   they report their observed reset back to the scheduler mutation queue.
 - Treated fully reset, inactive provider windows without a reset timestamp as

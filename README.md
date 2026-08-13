@@ -175,7 +175,16 @@ Reset-aware `windowId` values come from the normalized status API:
   `fable-5-weekly`;
 - Grok: `weekly`;
 - Codex: `<limit-id>:primary` or `<limit-id>:secondary`, using the exact IDs
-  returned for that account by `GET /api/status`.
+returned for that account by `GET /api/status`.
+
+Every successful heartbeat is followed by a usage check. When that check
+returns an authoritative next reset, Provider Pulse uses it. If the provider
+temporarily omits the timestamp—or the follow-up poll fails after the model
+request succeeded—the scheduler estimates the next reset from heartbeat
+completion plus the normalized window duration (five hours or seven days in
+the current adapters). Any later provider timestamp replaces that estimate.
+On restart, a handled inactive window can recover the same estimate from its
+persisted cursor rather than silently losing the next heartbeat.
 
 Provider window availability can vary by account and plan. After every
 successful usage check, an enabled heartbeat whose configured window or reset

@@ -234,6 +234,7 @@ interface RunningUsageOperation extends RunningOperation {
 interface SchedulerObservation {
   identityMatches: boolean;
   resetAt: string | null;
+  durationMinutes?: number;
 }
 
 export class ProviderPulseApplication {
@@ -357,6 +358,23 @@ export class ProviderPulseApplication {
       ...snapshot.heartbeats.filter((heartbeat) => heartbeat.enabled).map((heartbeat) => heartbeat.health),
       ...(snapshot.usageBaseline.health === "unhealthy" ? ["unhealthy" as const] : []),
     ]);
+    if (this.#initialized) {
+      const cursor = this.#scheduler.snapshot();
+      for (const heartbeat of snapshot.heartbeats) {
+        const jobCursor = cursor.jobs[heartbeat.id];
+        if (
+          jobCursor !== undefined &&
+          jobCursor.lastHandledResetAt !== jobCursor.lastObservedResetAt
+        ) {
+          heartbeat.nextEligibleAt = calculateResetEligibleAt(
+            jobCursor.lastObservedResetAt,
+            heartbeat.trigger.offsetMinutes,
+          ).toISOString();
+        } else {
+          delete heartbeat.nextEligibleAt;
+        }
+      }
+    }
     return snapshot;
   }
 
@@ -639,6 +657,7 @@ export class ProviderPulseApplication {
         const usageReceipt = this.checkUsage(job.accountId);
         await this.#usageOperations.get(job.accountId)?.promise.catch(() => undefined);
         void usageReceipt;
+        await this.#estimateResetAfterManualHeartbeat(job, completedAt);
       }
     } catch (error: unknown) {
       const completedAt = this.#now();
@@ -683,6 +702,9 @@ export class ProviderPulseApplication {
       // so a fully remaining window confirms that reset instead of blocking
       // the configured heartbeat that starts the next provider window.
       resetAt: window?.resetsAt ?? (isInactiveUsageWindow(window) ? eligibleResetAt : null),
+      ...(window?.durationMinutes === undefined
+        ? {}
+        : { durationMinutes: window.durationMinutes }),
     };
   }
 
@@ -716,6 +738,7 @@ export class ProviderPulseApplication {
       const resetAt = window?.resetsAt;
       if (resetAt === undefined) {
         if (isInactiveUsageWindow(window)) {
+          await this.#deriveNextResetFromHandledWindow(job, window);
           this.#store.updateHeartbeat(job.id, (current) => {
             const { nextEligibleAt: _nextEligibleAt, ...withoutNextEligibleAt } = current;
             if (!isResetObservationError(current.error)) return withoutNextEligibleAt;
@@ -819,6 +842,35 @@ export class ProviderPulseApplication {
     while (this.#resetObservationOperations.size > 0) {
       await Promise.all([...this.#resetObservationOperations]);
     }
+  }
+
+  async #deriveNextResetFromHandledWindow(
+    job: HeartbeatJobConfig,
+    window: UsageWindow,
+  ): Promise<void> {
+    const durationMinutes = window.durationMinutes;
+    if (
+      durationMinutes === undefined ||
+      !Number.isSafeInteger(durationMinutes) ||
+      durationMinutes <= 0
+    ) return;
+    await this.#scheduler.estimateNextResetFromHandled(job.id, durationMinutes);
+  }
+
+  async #estimateResetAfterManualHeartbeat(
+    job: HeartbeatJobConfig,
+    completedAt: Date,
+  ): Promise<void> {
+    if (!this.#initialized) return;
+    const window = this.#store.getAccount(job.accountId)?.usage.snapshot?.windows
+      .find((candidate) => candidate.id === job.trigger.windowId);
+    if (!isInactiveUsageWindow(window) || window.durationMinutes === undefined) return;
+    const durationMinutes = window.durationMinutes;
+    if (!Number.isSafeInteger(durationMinutes) || durationMinutes <= 0) return;
+    await this.#scheduler.observeReset(
+      job.id,
+      new Date(completedAt.getTime() + durationMinutes * 60_000).toISOString(),
+    );
   }
 
   #usageBaselineStatus(): UsageBaselineStatus {
@@ -1226,7 +1278,7 @@ function isResetObservationError(error: StatusError | undefined): boolean {
     error?.code === "heartbeat_reset_time_unavailable";
 }
 
-function isInactiveUsageWindow(window: UsageWindow | undefined): boolean {
+function isInactiveUsageWindow(window: UsageWindow | undefined): window is UsageWindow {
   return window !== undefined &&
     window.resetsAt === undefined &&
     (window.remainingPercent === 100 || window.usedPercent === 0);

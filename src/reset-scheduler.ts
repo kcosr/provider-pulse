@@ -16,6 +16,7 @@ export interface ResetAwareJob {
 export interface ResetVerification {
   identityMatches: boolean;
   resetAt: string | null;
+  durationMinutes?: number;
 }
 
 export interface ResetSchedulerCallbacks {
@@ -28,6 +29,7 @@ export interface ResetSchedulerCallbacks {
 
 export type SchedulerTickOutcome =
   | "heartbeat_succeeded"
+  | "heartbeat_succeeded_estimated_reset"
   | "heartbeat_succeeded_refresh_failed"
   | "heartbeat_failed"
   | "identity_mismatch"
@@ -139,6 +141,30 @@ export class ResetAwareScheduler {
     return this.#enqueueMutation(() => this.#observeReset(jobId, resetAt, options));
   }
 
+  estimateNextResetFromHandled(
+    jobId: string,
+    durationMinutes: number,
+  ): Promise<string | null> {
+    this.#assertInitialized();
+    return this.#enqueueMutation(async () => {
+      const duration = validDurationMinutes(durationMinutes);
+      if (duration === null) throw new TypeError("durationMinutes must be a positive integer");
+      const job = this.#jobs.find((candidate) => candidate.id === jobId);
+      if (job === undefined) throw new Error(`Unknown reset-aware scheduler job: ${jobId}`);
+      const cursor = this.#cursor.jobs[jobId];
+      if (
+        cursor === undefined ||
+        cursor.lastHandledResetAt !== cursor.lastObservedResetAt
+      ) return null;
+      const estimatedResetAt = new Date(
+        Date.parse(cursor.lastHandledResetAt) +
+        (job.offsetMinutes + duration) * 60_000,
+      ).toISOString();
+      await this.#observeReset(jobId, estimatedResetAt, {});
+      return estimatedResetAt;
+    });
+  }
+
   async #observeReset(
     jobId: string,
     resetAt: string,
@@ -148,6 +174,16 @@ export class ResetAwareScheduler {
     if (job === undefined) throw new Error(`Unknown reset-aware scheduler job: ${jobId}`);
     const normalizedResetAt = normalizeTimestamp(resetAt);
     const previous = this.#cursor.jobs[jobId];
+    if (
+      previous !== undefined &&
+      previous.lastObservedResetAt !== normalizedResetAt &&
+      previous.lastHandledResetAt === normalizedResetAt
+    ) {
+      // A usage poll started during the heartbeat cycle can complete after the
+      // scheduler has already installed the next reset. Its old, just-handled
+      // reset must not replace that newer deadline.
+      return;
+    }
     if (previous?.lastObservedResetAt === normalizedResetAt) {
       if (options.markFreshObservation === true && previous.lastHandledResetAt !== normalizedResetAt) {
         this.#attemptedResets.delete(jobId);
@@ -231,12 +267,40 @@ export class ResetAwareScheduler {
         continue;
       }
 
+      const fallbackDurationMinutes = validDurationMinutes(verification.durationMinutes);
+      const heartbeatCompletedAt = this.#now();
       try {
         const refreshed = await this.#callbacks.refreshUsage(job, eligibleResetAt);
         if (refreshed.identityMatches && refreshed.resetAt !== null) {
-          await this.#observeReset(job.id, refreshed.resetAt, {});
+          const refreshedResetAt = normalizeTimestamp(refreshed.resetAt);
+          if (refreshedResetAt !== eligibleResetAt) {
+            await this.#observeReset(job.id, refreshedResetAt, {});
+            results.push({ jobId: job.id, resetAt: eligibleResetAt, outcome: "heartbeat_succeeded" });
+            continue;
+          }
+        }
+        const durationMinutes = validDurationMinutes(refreshed.durationMinutes) ?? fallbackDurationMinutes;
+        if (durationMinutes !== null) {
+          await this.#observeReset(
+            job.id,
+            calculateEstimatedResetAt(heartbeatCompletedAt, durationMinutes).toISOString(),
+            {},
+          );
+          results.push({
+            jobId: job.id,
+            resetAt: eligibleResetAt,
+            outcome: "heartbeat_succeeded_estimated_reset",
+          });
+          continue;
         }
       } catch (error: unknown) {
+        if (fallbackDurationMinutes !== null) {
+          await this.#observeReset(
+            job.id,
+            calculateEstimatedResetAt(heartbeatCompletedAt, fallbackDurationMinutes).toISOString(),
+            {},
+          );
+        }
         results.push({
           jobId: job.id,
           resetAt: eligibleResetAt,
@@ -273,6 +337,21 @@ export function calculateResetEligibleAt(resetAt: string, offsetMinutes: number)
     throw new TypeError("offsetMinutes must be a non-negative integer");
   }
   return new Date(Date.parse(normalizeTimestamp(resetAt)) + offsetMinutes * 60_000);
+}
+
+export function calculateEstimatedResetAt(
+  heartbeatCompletedAt: Date,
+  durationMinutes: number,
+): Date {
+  const normalizedDuration = validDurationMinutes(durationMinutes);
+  if (normalizedDuration === null) {
+    throw new TypeError("durationMinutes must be a positive integer");
+  }
+  return new Date(heartbeatCompletedAt.getTime() + normalizedDuration * 60_000);
+}
+
+function validDurationMinutes(value: number | undefined): number | null {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function normalizeTimestamp(value: string): string {
