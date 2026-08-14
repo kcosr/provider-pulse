@@ -366,6 +366,14 @@ h1 {
 .remaining-bar.critical { background: rgba(238, 111, 105, .16); }
 .remaining-bar.critical .remaining-bar-current { background: var(--red); }
 
+.metric-baseline {
+  margin-top: 4px;
+  color: var(--subtle);
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: right;
+}
+
 .week-progress {
   margin-top: 8px;
 }

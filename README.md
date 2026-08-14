@@ -231,6 +231,8 @@ individual outcomes.
 The snapshot action never accepts usage values from the browser. It atomically
 saves the server's current percentage-based readings. When no baseline exists,
 the first successful usage check seeds each available window automatically.
+Every percentage row shows the date and time when its current comparison
+snapshot was captured.
 Provider reset detection rebases only the affected account/window pair.
 
 The web page exposes the same per-card and bulk actions. Heartbeats deliberately

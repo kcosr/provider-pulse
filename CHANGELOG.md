@@ -13,6 +13,7 @@ All notable changes to Provider Pulse are documented here. The project follows
   server-persisted snapshot. A global action replaces the snapshot, first
   successful readings seed missing baselines, and provider resets rebase only
   the affected quota window.
+- Each percentage row displays when its comparison snapshot was captured.
 
 ### Fixed
 

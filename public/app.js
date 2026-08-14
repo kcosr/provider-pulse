@@ -201,7 +201,8 @@
 
   function baselineTime(value) {
     return new Intl.DateTimeFormat(undefined, {
-      month: "short",
+      weekday: "short",
+      month: "numeric",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
@@ -289,6 +290,9 @@
         bar.setAttribute("aria-valuetext", `${metricValue(metric)}; ${comparisonLabel}`);
       }
       node.append(bar);
+      if (comparison !== null) {
+        node.append(create("div", "metric-baseline", `Snapshot ${baselineTime(comparison.capturedAt)}`));
+      }
     }
     const weeklyProgress = renderWeeklyTimeProgress(metric, label);
     if (weeklyProgress !== null) node.append(weeklyProgress);
