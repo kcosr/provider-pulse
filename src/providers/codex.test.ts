@@ -230,6 +230,10 @@ describe("probeCodexUsage", () => {
     expect(fake.requests[0]).toMatchObject({
       params: { capabilities: { experimentalApi: true, requestAttestation: false } },
     });
+    expect(fake.requests[2]).toMatchObject({
+      method: "account/read",
+      params: { refreshToken: true },
+    });
     expect(result).toMatchObject({
       adapter: "codex-app-server",
       adapterVersion: 2,

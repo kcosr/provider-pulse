@@ -41,6 +41,9 @@ file.
 Codex polling uses its structured app-server protocol. Claude and Grok usage
 polling requires tmux because their usage data is currently exposed through
 interactive `/usage` screens rather than a suitable headless JSON command.
+Each Codex poll asks the app-server to refresh its OAuth access token before
+reading quota data. This keeps an authenticated monitoring home usable without
+sending a model request.
 Fireworks polling calls the official structured account, quota, and billing
 summary APIs. It shows account identity, health, and exact calendar-month
 spend. A finite monthly budget is also shown as capacity remaining.

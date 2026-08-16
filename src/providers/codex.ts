@@ -314,7 +314,10 @@ export async function probeCodexUsage(options: CodexUsageProbeOptions): Promise<
         capabilities: { experimentalApi: true, requestAttestation: false },
       });
       await client.notify("initialized");
-      const account = await client.request("account/read", { refreshToken: false });
+      // A passive monitor may outlive Codex's short-lived access token without
+      // making model requests. Refresh explicitly before quota reads so an
+      // otherwise valid monitoring home does not fail with token_expired.
+      const account = await client.request("account/read", { refreshToken: true });
       const rateLimits = await client.request("account/rateLimits/read");
       let activity: unknown;
       try {

@@ -19,6 +19,8 @@ All notable changes to Provider Pulse are documented here. The project follows
 
 ### Fixed
 
+- Codex usage polling now refreshes an expired OAuth access token before
+  requesting quota data instead of surfacing a generic app-server RPC failure.
 - Reset-aware heartbeats now retain a duration-based next-reset estimate when
   the immediate post-heartbeat usage poll omits or fails to return `resetsAt`.
   Later provider timestamps replace the estimate, and startup repairs handled
