@@ -11,6 +11,8 @@ and quota polling. See [the Fireworks integration notes](docs/fireworks-follow-u
 ## What it does
 
 - Shows every configured account under an operator-chosen label.
+- Provides a browser-remembered toggle that redacts account labels and identity
+  text from the dashboard without changing the status API.
 - Reports all provider usage windows it can observe, including reset times.
 - Shows seven-day quota windows as seven elapsed-time cells alongside capacity.
 - Compares an optional expected email with the identity observed by the CLI.
@@ -239,6 +241,13 @@ The web page exposes the same per-card and bulk actions. Heartbeats deliberately
 have no confirmation modal, so treat the buttons as real quota-consuming
 actions. Failed or timed-out heartbeats are not automatically retried because
 the provider may have accepted a request whose response was lost.
+
+The dashboard uses three columns on wide screens, two on medium screens, and
+one on narrow screens. **Hide identities** replaces configured account labels,
+emails, and organization text with `Redacted` while retaining provider and plan
+context. The preference is stored in browser local storage. It is a display
+privacy feature only: `GET /api/status` continues to return configured and
+observed identity data to the trusted local caller.
 
 Each normalized seven-day quota window also shows a seven-cell time-progress
 bar. Completed 24-hour slices are filled, the current slice is partially filled,

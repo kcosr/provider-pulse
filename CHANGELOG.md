@@ -14,6 +14,8 @@ All notable changes to Provider Pulse are documented here. The project follows
   successful readings seed missing baselines, and provider resets rebase only
   the affected quota window.
 - Each percentage row displays when its comparison snapshot was captured.
+- The wide-screen dashboard now uses three account columns and includes a
+  remembered toggle that redacts account labels and identity text.
 
 ### Fixed
 

@@ -5,9 +5,11 @@
   const ACTION_REFRESH_MS = 800;
   const WEEK_DURATION_MINUTES = 7 * 24 * 60;
   const DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
+  const IDENTITY_REDACTION_KEY = "provider-pulse.identities-redacted";
   const state = {
     status: null,
     fetching: false,
+    identitiesRedacted: loadIdentityRedaction(),
     pendingAccounts: new Set(),
     pendingHeartbeats: new Set(),
     pendingBulk: new Set(),
@@ -22,8 +24,23 @@
     notice: document.getElementById("notice"),
     overallHealth: document.getElementById("overallHealth"),
     snapshotUsage: document.getElementById("snapshotUsage"),
+    toggleIdentity: document.getElementById("toggleIdentity"),
     updated: document.getElementById("updated"),
   };
+
+  function loadIdentityRedaction() {
+    try {
+      return window.localStorage.getItem(IDENTITY_REDACTION_KEY) === "true";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function saveIdentityRedaction(value) {
+    try {
+      window.localStorage.setItem(IDENTITY_REDACTION_KEY, String(value));
+    } catch (_) { /* The preference remains active for this page load. */ }
+  }
 
   function asArray(value) {
     return Array.isArray(value) ? value : [];
@@ -335,6 +352,13 @@
     const hasHeartbeatRunning = heartbeatJobs.some((job) => state.pendingHeartbeats.has(job.id) || job.inFlight || healthOf(job) === "running");
     const accountHealth = identity.match === false ? "unhealthy" : healthOf(usagePoll);
     const provider = providerPresentation(account.provider);
+    const accountLabel = state.identitiesRedacted
+      ? `${provider.label} · Redacted`
+      : account.label || `${provider.label} account`;
+    const plan = identity.observed.plan || identity.observed.subscriptionType || identity.observed.subscription;
+    const identityDetails = state.identitiesRedacted
+      ? ["Redacted", plan].filter(Boolean).join(" · ")
+      : identity.details;
     const card = create("article", `account-card ${accountHealth}`);
     card.setAttribute("aria-labelledby", `account-${account.id}`);
 
@@ -343,18 +367,20 @@
     icon.setAttribute("aria-hidden", "true");
     identityRow.append(icon);
     const copy = create("div", "identity-copy");
-    copy.append(create("div", "account-name", account.label || `${provider.label} account`));
+    copy.append(create("div", "account-name", accountLabel));
     copy.firstChild.id = `account-${account.id}`;
     const meta = create("div", "account-meta");
     const symbol = create("span", `identity-symbol ${identity.match === false ? "mismatch" : identity.match === null ? "unknown" : ""}`, identity.match === true ? "✓" : identity.match === false ? "!" : "·");
     symbol.setAttribute("aria-label", identity.match === true ? "Identity matches" : identity.match === false ? "Identity mismatch" : "Identity not checked");
-    meta.append(symbol, create("span", "account-meta-text", identity.details));
+    meta.append(symbol, create("span", "account-meta-text", identityDetails));
     copy.append(meta);
     identityRow.append(copy);
     card.append(identityRow);
 
     if (identity.match === false) {
-      const expected = identity.expected.email || identity.expected.accountId || "configured identity";
+      const expected = state.identitiesRedacted
+        ? "configured identity"
+        : identity.expected.email || identity.expected.accountId || "configured identity";
       card.append(create("div", "mismatch-note", `Identity mismatch · expected ${expected}. Heartbeats are blocked.`));
     }
 
@@ -378,7 +404,7 @@
     actions.append(button(
       pendingPoll ? "Checking…" : "Check usage",
       "action-button",
-      () => runAction(`/api/accounts/${encodeURIComponent(account.id)}/check`, `Checking ${account.label || provider.label}`, state.pendingAccounts, account.id),
+      () => runAction(`/api/accounts/${encodeURIComponent(account.id)}/check`, `Checking ${accountLabel}`, state.pendingAccounts, account.id),
       pendingPoll,
     ));
     heartbeatGroups.forEach((group) => {
@@ -388,7 +414,7 @@
       actions.append(button(
         running ? "Running…" : "Heartbeat",
         "action-button heartbeat",
-        () => runAction(`/api/heartbeats/${encodeURIComponent(job.id)}/run`, `Running ${job.label || "heartbeat"}`, state.pendingHeartbeats, job.id),
+        () => runAction(`/api/heartbeats/${encodeURIComponent(job.id)}/run`, `Running heartbeat for ${accountLabel}`, state.pendingHeartbeats, job.id),
         running || blocked || hasHeartbeatRunning,
         blocked ? identity.match === false ? "Blocked by identity mismatch" : "Heartbeat disabled" : undefined,
       ));
@@ -399,6 +425,8 @@
   }
 
   function render() {
+    elements.toggleIdentity.setAttribute("aria-pressed", String(state.identitiesRedacted));
+    elements.toggleIdentity.textContent = state.identitiesRedacted ? "Show identities" : "Hide identities";
     if (!state.status) return;
     const accounts = asArray(state.status.accounts);
     elements.accounts.replaceChildren();
@@ -546,11 +574,18 @@
   elements.checkAll.addEventListener("click", () => runAction("/api/check-all", "Checking all accounts", state.pendingBulk, "check"));
   elements.snapshotUsage.addEventListener("click", snapshotUsage);
   elements.heartbeatAll.addEventListener("click", () => runAction("/api/heartbeat-all", "Running all enabled heartbeats", state.pendingBulk, "heartbeat"));
+  elements.toggleIdentity.addEventListener("click", () => {
+    state.identitiesRedacted = !state.identitiesRedacted;
+    saveIdentityRedaction(state.identitiesRedacted);
+    elements.announcer.textContent = state.identitiesRedacted ? "Account identities hidden" : "Account identities shown";
+    render();
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) fetchStatus();
   });
 
+  render();
   showSkeleton();
   fetchStatus();
   window.setInterval(() => {

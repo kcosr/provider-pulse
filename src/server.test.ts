@@ -94,12 +94,14 @@ describe("HTTP API", () => {
     expect(page.headers["x-frame-options"]).toBe("DENY");
     expect(page.headers["x-content-type-options"]).toBe("nosniff");
     expect(page.headers["referrer-policy"]).toBe("no-referrer");
+    expect(page.body).toContain('id="toggleIdentity"');
     const script = await server.inject({
       method: "GET",
       url: "/app.js",
       headers: { host: "127.0.0.1:4317" },
     });
     expect(script.headers["cache-control"]).toBe("no-store");
+    expect(script.body).toContain("provider-pulse.identities-redacted");
     await application.close();
   });
 

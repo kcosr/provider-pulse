@@ -54,7 +54,7 @@ button { font: inherit; }
 .skip-link:focus { transform: translateY(0); }
 
 .shell {
-  width: min(920px, calc(100% - 28px));
+  width: min(1320px, calc(100% - 28px));
   margin: 0 auto;
   padding: 36px 0 26px;
 }
@@ -120,7 +120,7 @@ h1 {
   font-size: 11px;
 }
 
-.global-actions { gap: 8px; }
+.global-actions { justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
 .health-pill {
   gap: 7px;
@@ -193,7 +193,7 @@ h1 {
 
 .account-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -522,6 +522,10 @@ h1 {
 @media (pointer: coarse) {
   .button,
   .action-button { min-height: 40px; }
+}
+
+@media (max-width: 1020px) {
+  .account-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 720px) {
