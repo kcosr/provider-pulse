@@ -191,15 +191,19 @@ the adapter:
 "usageSource": {
   "adapter": "codex-app-server",
   "credentialSurfaceId": "codex-primary-native",
-  "hiddenWindowIds": ["codex_bengalfox:primary"]
+  "hiddenWindowIds": [
+    "codex_bengalfox:primary",
+    "codex_bengalfox:secondary"
+  ]
 }
 ```
 
 Hidden windows are removed before status storage, comparison baselines, and
 reset scheduling, so they do not appear in the dashboard or `GET /api/status`.
 A heartbeat cannot target a hidden window. The Codex Spark bucket currently
-uses `codex_bengalfox:primary`; configure this explicitly per account rather
-than relying on a provider-name heuristic.
+uses the `codex_bengalfox` limit ID and may expose `:primary`, `:secondary`, or
+both windows; configure both exact IDs per account rather than relying on a
+provider-name heuristic.
 
 Every successful heartbeat is followed by a usage check. When that check
 returns an authoritative next reset, Provider Pulse uses it. If the provider
