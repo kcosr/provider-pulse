@@ -7,6 +7,11 @@ All notable changes to Provider Pulse are documented here. The project follows
 
 ### Added
 
+- Codex status now includes banked reset-credit counts and available detail
+  records from the structured app-server API without redeeming them.
+- Accounts can hide exact normalized usage-window IDs through strict operator
+  configuration; hidden windows are excluded from status, baselines, and reset
+  scheduling. The example hides the GPT-5.3-Codex-Spark bucket.
 - Seven-day quota windows now include a seven-cell elapsed-time bar, with the
   current day partially filled toward the provider-reported reset.
 - Dashboard quota bars show capacity consumed since an owner-only,

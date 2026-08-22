@@ -139,6 +139,33 @@
     }));
   }
 
+  function resetCreditsFor(account) {
+    const summary = account.usage?.snapshot?.resetCredits;
+    const availableCount = Number(summary?.availableCount);
+    if (!Number.isSafeInteger(availableCount) || availableCount < 0) return [];
+    const nextExpiry = asArray(summary.credits)
+      .filter((credit) => credit.status === "available")
+      .map((credit) => dateValue(credit.expiresAt))
+      .filter(Boolean)
+      .sort((left, right) => left.getTime() - right.getTime())[0];
+    const expiry = nextExpiry === undefined
+      ? ""
+      : `next expires ${new Intl.DateTimeFormat(undefined, {
+        weekday: "short",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(nextExpiry)}`;
+    return [{
+      id: "reset-credits",
+      label: "Banked resets",
+      amount: availableCount,
+      unit: availableCount === 1 ? "reset" : "resets",
+      detail: expiry,
+    }];
+  }
+
   function heartbeatsFor(account) {
     return asArray(state.status?.heartbeats).filter((job) => job.accountId === account.id);
   }
@@ -385,7 +412,11 @@
     }
 
     const metrics = create("div", "metrics");
-    const availableMetrics = [...windowsFor(account), ...balancesFor(account)];
+    const availableMetrics = [
+      ...windowsFor(account),
+      ...resetCreditsFor(account),
+      ...balancesFor(account),
+    ];
     if (availableMetrics.length) availableMetrics.forEach((metric) => metrics.append(renderMetric(account.id, metric)));
     else metrics.append(create("div", "empty-metrics", pendingPoll ? "Checking provider usage…" : "Usage unavailable — check this account"));
     card.append(metrics);

@@ -54,6 +54,7 @@ export interface AccountConfig {
   usageSource: {
     adapter: UsageAdapter;
     credentialSurfaceId: string;
+    hiddenWindowIds?: string[];
   };
 }
 
@@ -176,10 +177,26 @@ export interface UsageBalance {
   resetsAt?: string;
 }
 
+export interface UsageResetCredit {
+  id: string;
+  resetType: string;
+  status: string;
+  grantedAt: string;
+  expiresAt?: string;
+  title?: string;
+  description?: string;
+}
+
+export interface UsageResetCredits {
+  availableCount: number;
+  credits?: UsageResetCredit[];
+}
+
 export interface UsageSnapshot {
   observedAt: string;
   windows: UsageWindow[];
   balances: UsageBalance[];
+  resetCredits?: UsageResetCredits;
 }
 
 export interface UsageStatus extends OperationState {

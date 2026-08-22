@@ -43,6 +43,7 @@ import type {
   StatusError,
   UsageBalance,
   UsageBaselineStatus,
+  UsageResetCredits,
   UsageSnapshot,
   UsageWindow,
 } from "./types.js";
@@ -511,6 +512,7 @@ export class ProviderPulseApplication {
     try {
       const surface = this.#requireSurface(account.usageSource.credentialSurfaceId);
       const result = await this.#withSurface(surface.id, () => this.#usageProbe(account, surface));
+      const snapshot = applyUsageWindowVisibility(account, result.snapshot);
       const completedAt = this.#now();
       const identity = compareIdentity(account.expectedIdentity, result.identity);
       const mismatch = identity.match === "mismatched";
@@ -525,10 +527,10 @@ export class ProviderPulseApplication {
           durationMs: Math.max(0, completedAt.getTime() - attemptedAt.getTime()),
           ...(mismatch ? { error: identityMismatchError() } : {}),
           identity,
-          snapshot: structuredClone(result.snapshot),
+          snapshot: structuredClone(snapshot),
         },
       }));
-      await this.#reconcileUsageBaseline(account.id, result.snapshot, completedAt)
+      await this.#reconcileUsageBaseline(account.id, snapshot, completedAt)
         .catch(async (error: unknown) => {
           const normalized = normalizeError(error, "usage_baseline_write_failed");
           this.#usageBaselineError = normalized;
@@ -546,7 +548,7 @@ export class ProviderPulseApplication {
       const markFreshObservation = this.#usageOperations.get(account.id)?.markFreshObservation ?? false;
       this.#scheduleAccountResetObservation(
         account.id,
-        result.snapshot.windows,
+        snapshot.windows,
         markFreshObservation,
       );
       await this.#log({
@@ -883,7 +885,10 @@ export class ProviderPulseApplication {
       ...(this.#usageBaselineState.updatedAt === null
         ? {}
         : { updatedAt: this.#usageBaselineState.updatedAt }),
-      metrics: this.#usageBaselineState.metrics.map((metric) => ({
+      metrics: this.#usageBaselineState.metrics
+        .filter((metric) => metric.metricKind !== "window" ||
+          this.#accounts.get(metric.accountId)?.usageSource.hiddenWindowIds?.includes(metric.metricId) !== true)
+        .map((metric) => ({
         accountId: metric.accountId,
         metricKind: metric.metricKind,
         metricId: metric.metricId,
@@ -1052,6 +1057,9 @@ function createDefaultUsageRuntime(probeDirectory: string): DefaultUsageRuntime 
             observedAt: value.observedAt,
             windows: value.windows.map((window) => ({ ...window })),
             balances: value.balances.map(normalizeCodexBalance),
+            ...(value.resetCredits === undefined
+              ? {}
+              : { resetCredits: normalizeCodexResetCredits(value.resetCredits) }),
           },
           implementation: value.adapter,
           implementationVersion: String(value.adapterVersion),
@@ -1140,6 +1148,26 @@ function normalizeCodexBalance(balance: {
   };
 }
 
+function normalizeCodexResetCredits(resetCredits: {
+  availableCount: number;
+  credits?: readonly {
+    id: string;
+    resetType: string;
+    status: string;
+    grantedAt: string;
+    expiresAt?: string;
+    title?: string;
+    description?: string;
+  }[];
+}): UsageResetCredits {
+  return {
+    availableCount: resetCredits.availableCount,
+    ...(resetCredits.credits === undefined
+      ? {}
+      : { credits: resetCredits.credits.map((credit) => ({ ...credit })) }),
+  };
+}
+
 function normalizeParsedWindow(window: {
   id: string;
   label: string;
@@ -1157,6 +1185,19 @@ function normalizeParsedWindow(window: {
     ...(window.durationMinutes === undefined ? {} : { durationMinutes: window.durationMinutes }),
     ...(window.resetsAt === undefined || window.resetsAt === null ? {} : { resetsAt: window.resetsAt }),
     ...(window.reached === undefined ? {} : { reached: window.reached }),
+  };
+}
+
+function applyUsageWindowVisibility(
+  account: AccountConfig,
+  snapshot: UsageSnapshot,
+): UsageSnapshot {
+  const hidden = new Set(account.usageSource.hiddenWindowIds ?? []);
+  return {
+    ...structuredClone(snapshot),
+    windows: snapshot.windows
+      .filter((window) => !hidden.has(window.id))
+      .map((window) => structuredClone(window)),
   };
 }
 

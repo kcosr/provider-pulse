@@ -38,6 +38,47 @@ describe("ProviderPulseApplication", () => {
     await app.close();
   });
 
+  it("filters configured windows before status, baselines, and reset scheduling", async () => {
+    const config = await testConfig();
+    config.accounts[0]!.usageSource.hiddenWindowIds = ["codex_bengalfox:primary"];
+    const app = new ProviderPulseApplication(config, {
+      usageProbe: async () => ({
+        ...successfulUsage("person@example.com", [
+          { id: "codex:primary", label: "Codex Primary", remainingPercent: 60 },
+          {
+            id: "codex_bengalfox:primary",
+            label: "GPT-5.3-Codex-Spark Primary",
+            remainingPercent: 100,
+          },
+        ]),
+        snapshot: {
+          observedAt: "2026-08-21T12:00:00.000Z",
+          windows: [
+            { id: "codex:primary", label: "Codex Primary", remainingPercent: 60 },
+            {
+              id: "codex_bengalfox:primary",
+              label: "GPT-5.3-Codex-Spark Primary",
+              remainingPercent: 100,
+            },
+          ],
+          balances: [],
+          resetCredits: { availableCount: 2 },
+        },
+      }),
+    });
+
+    app.checkUsage("codex-one");
+    await vi.waitFor(() => expect(app.getStatus().accounts[0]?.usage.health).toBe("healthy"));
+    expect(app.getStatus().accounts[0]?.usage.snapshot).toMatchObject({
+      windows: [{ id: "codex:primary" }],
+      resetCredits: { availableCount: 2 },
+    });
+    expect(app.getStatus().usageBaseline.metrics).toEqual([
+      expect.objectContaining({ metricId: "codex:primary" }),
+    ]);
+    await app.close();
+  });
+
   it("persists baselines and rebases only the provider window that resets", async () => {
     const config = await testConfig();
     let now = new Date("2026-08-12T14:00:00.000Z");

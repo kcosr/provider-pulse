@@ -64,6 +64,43 @@ describe("parseConfig", () => {
     expect(parseConfig(config).heartbeatJobs[0]?.trigger.windowId).toBe("codex:primary");
   });
 
+  it("accepts unique hidden usage windows and rejects heartbeat triggers for them", () => {
+    const config = validConfig();
+    const account = (config.accounts as Record<string, unknown>[])[0]!;
+    account.usageSource = {
+      adapter: "codex-app-server",
+      credentialSurfaceId: "codex-primary-native",
+      hiddenWindowIds: ["codex_bengalfox:primary"],
+    };
+    expect(parseConfig(config).accounts[0]?.usageSource.hiddenWindowIds)
+      .toEqual(["codex_bengalfox:primary"]);
+
+    config.heartbeatJobs = [{
+      id: "hidden-window-heartbeat",
+      accountId: "codex-primary",
+      credentialSurfaceId: "codex-primary-native",
+      executor: "native-codex",
+      model: "gpt-5.6-luna",
+      reasoning: "medium",
+      prompt: "Reply OK.",
+      trigger: { type: "after-reset", windowId: "codex_bengalfox:primary", offsetMinutes: 2 },
+      timeoutSeconds: 120,
+      enabled: true,
+    }];
+    expect(() => parseConfig(config)).toThrow(/cannot target a hidden usage window/);
+  });
+
+  it("rejects duplicate hidden usage-window IDs", () => {
+    const config = validConfig();
+    const account = (config.accounts as Record<string, unknown>[])[0]!;
+    account.usageSource = {
+      adapter: "codex-app-server",
+      credentialSurfaceId: "codex-primary-native",
+      hiddenWindowIds: ["codex_bengalfox:primary", "codex_bengalfox:primary"],
+    };
+    expect(() => parseConfig(config)).toThrow(/duplicate usage-window IDs/);
+  });
+
   it("rejects unknown fields", () => {
     expect(() => parseConfig({ ...validConfig(), ignored: true })).toThrow(/Unrecognized key/);
   });

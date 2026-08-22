@@ -50,6 +50,13 @@ const accountSchema = z.strictObject({
   usageSource: z.strictObject({
     adapter: z.enum(USAGE_ADAPTERS),
     credentialSurfaceId: idSchema,
+    hiddenWindowIds: z
+      .array(usageWindowIdSchema)
+      .max(100)
+      .refine((values) => new Set(values).size === values.length, {
+        message: "must not contain duplicate usage-window IDs",
+      })
+      .optional(),
   }),
 });
 
@@ -173,6 +180,12 @@ const configSchema = z
           context,
           ["heartbeatJobs", index, "accountId"],
           "Fireworks accounts do not support heartbeats",
+        );
+      } else if (account.usageSource.hiddenWindowIds?.includes(job.trigger.windowId) === true) {
+        addIssue(
+          context,
+          ["heartbeatJobs", index, "trigger", "windowId"],
+          "cannot target a hidden usage window",
         );
       } else if (job.executor !== "pi") {
         const expectedProvider = job.executor.replace(/^native-/, "");

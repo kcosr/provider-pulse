@@ -14,6 +14,8 @@ and quota polling. See [the Fireworks integration notes](docs/fireworks-follow-u
 - Provides a browser-remembered toggle that redacts account labels and identity
   text from the dashboard without changing the status API.
 - Reports all provider usage windows it can observe, including reset times.
+- Reports Codex banked reset-credit counts and bounded credit details when the
+  app-server exposes them; it never redeems a credit.
 - Shows seven-day quota windows as seven elapsed-time cells alongside capacity.
 - Compares an optional expected email with the identity observed by the CLI.
 - Records the current usage-poll and heartbeat health in memory.
@@ -182,6 +184,23 @@ Reset-aware `windowId` values come from the normalized status API:
 - Codex: `<limit-id>:primary` or `<limit-id>:secondary`, using the exact IDs
 returned for that account by `GET /api/status`.
 
+An account may hide provider windows by exact normalized ID without changing
+the adapter:
+
+```json
+"usageSource": {
+  "adapter": "codex-app-server",
+  "credentialSurfaceId": "codex-primary-native",
+  "hiddenWindowIds": ["codex_bengalfox:primary"]
+}
+```
+
+Hidden windows are removed before status storage, comparison baselines, and
+reset scheduling, so they do not appear in the dashboard or `GET /api/status`.
+A heartbeat cannot target a hidden window. The Codex Spark bucket currently
+uses `codex_bengalfox:primary`; configure this explicitly per account rather
+than relying on a provider-name heuristic.
+
 Every successful heartbeat is followed by a usage check. When that check
 returns an authoritative next reset, Provider Pulse uses it. If the provider
 temporarily omits the timestamp—or the follow-up poll fails after the model
@@ -217,6 +236,31 @@ GET /api/status
 The response is one normalized JSON object containing overall health, account
 identity and usage windows, the most recent usage-poll result, and all heartbeat
 job states. It never starts a CLI, refreshes a token, or sends a model request.
+When Codex reports banked resets, the account snapshot also contains:
+
+```json
+{
+  "resetCredits": {
+    "availableCount": 2,
+    "credits": [
+      {
+        "id": "opaque-provider-id",
+        "resetType": "codexRateLimits",
+        "status": "available",
+        "grantedAt": "2026-08-21T12:00:00.000Z",
+        "expiresAt": "2026-08-28T12:00:00.000Z",
+        "title": "Banked reset",
+        "description": "Provider-supplied description"
+      }
+    ]
+  }
+}
+```
+
+`availableCount` is authoritative. `credits` is omitted when the provider
+returns only a count, may be an empty array when details were fetched but none
+exist, and may contain fewer records than the count when the provider caps the
+detail response.
 
 Actions are started with:
 

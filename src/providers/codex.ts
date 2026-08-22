@@ -75,14 +75,29 @@ export interface CodexUsageActivity {
   readonly dailyUsage?: readonly { readonly startDate: string; readonly tokens: number }[];
 }
 
+export interface CodexResetCredit {
+  readonly id: string;
+  readonly resetType: string;
+  readonly status: string;
+  readonly grantedAt: string;
+  readonly expiresAt?: string;
+  readonly title?: string;
+  readonly description?: string;
+}
+
+export interface CodexResetCredits {
+  readonly availableCount: number;
+  readonly credits?: readonly CodexResetCredit[];
+}
+
 export interface CodexUsageSnapshot {
   readonly adapter: "codex-app-server";
-  readonly adapterVersion: 2;
+  readonly adapterVersion: 3;
   readonly observedAt: string;
   readonly identity: CodexObservedIdentity;
   readonly windows: readonly CodexUsageWindow[];
   readonly balances: readonly CodexBalance[];
-  readonly resetCreditsAvailable?: number;
+  readonly resetCredits?: CodexResetCredits;
   readonly activity?: CodexUsageActivity;
 }
 
@@ -408,16 +423,16 @@ function normalizeSnapshot(
       });
     }
   }
-  const resetCreditsAvailable = normalizeResetCredits(limits.rateLimitResetCredits);
+  const resetCredits = normalizeResetCredits(limits.rateLimitResetCredits);
   const activity = normalizeActivity(activityValue);
   return {
     adapter: "codex-app-server",
-    adapterVersion: 2,
+    adapterVersion: 3,
     observedAt: observedAt.toISOString(),
     identity,
     windows,
     balances,
-    ...(resetCreditsAvailable === undefined ? {} : { resetCreditsAvailable }),
+    ...(resetCredits === undefined ? {} : { resetCredits }),
     ...(activity === undefined ? {} : { activity }),
   };
 }
@@ -459,9 +474,31 @@ function rateLimitBucketRank(id: string): number {
   return 1;
 }
 
-function normalizeResetCredits(value: unknown): number | undefined {
+function normalizeResetCredits(value: unknown): CodexResetCredits | undefined {
   if (value === null || value === undefined) return undefined;
-  return requireNonnegativeSafeInteger(requireRecord(value, "reset credits").availableCount, "available reset credits");
+  const summary = requireRecord(value, "reset credits");
+  const availableCount = requireNonnegativeSafeInteger(
+    summary.availableCount,
+    "available reset credits",
+  );
+  if (summary.credits === null || summary.credits === undefined) return { availableCount };
+  if (!Array.isArray(summary.credits)) throw parseError("Invalid Codex reset credit details.");
+  const credits = summary.credits.map((value, index): CodexResetCredit => {
+    const credit = requireRecord(value, `reset credit ${index}`);
+    const expiresAt = optionalEpochSeconds(credit.expiresAt, `reset credit ${index} expiresAt`);
+    const title = optionalString(credit.title);
+    const description = optionalString(credit.description);
+    return {
+      id: requireString(credit.id, `reset credit ${index} ID`),
+      resetType: requireString(credit.resetType, `reset credit ${index} type`),
+      status: requireString(credit.status, `reset credit ${index} status`),
+      grantedAt: requireEpochSeconds(credit.grantedAt, `reset credit ${index} grantedAt`),
+      ...(expiresAt === undefined ? {} : { expiresAt }),
+      ...(title === undefined ? {} : { title }),
+      ...(description === undefined ? {} : { description }),
+    };
+  });
+  return { availableCount, credits };
 }
 
 function normalizeActivity(value: unknown): CodexUsageActivity | undefined {

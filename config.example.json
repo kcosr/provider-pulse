@@ -24,7 +24,10 @@
       },
       "usageSource": {
         "adapter": "codex-app-server",
-        "credentialSurfaceId": "codex-primary-native"
+        "credentialSurfaceId": "codex-primary-native",
+        "hiddenWindowIds": [
+          "codex_bengalfox:primary"
+        ]
       }
     },
     {

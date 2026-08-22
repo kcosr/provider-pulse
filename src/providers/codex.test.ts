@@ -141,7 +141,18 @@ function standardResponse(method: unknown): unknown {
             rateLimitReachedType: "primary",
           },
         },
-        rateLimitResetCredits: { availableCount: 2, credits: [] },
+        rateLimitResetCredits: {
+          availableCount: 2,
+          credits: [{
+            id: "reset-credit-one",
+            resetType: "codexRateLimits",
+            status: "available",
+            grantedAt: 1_800_000_000,
+            expiresAt: 1_800_259_200,
+            title: "Banked reset",
+            description: "Restores the Codex rate limit.",
+          }],
+        },
       };
     case "account/usage/read":
       return {
@@ -236,10 +247,21 @@ describe("probeCodexUsage", () => {
     });
     expect(result).toMatchObject({
       adapter: "codex-app-server",
-      adapterVersion: 2,
+      adapterVersion: 3,
       observedAt: "2026-08-11T12:00:00.000Z",
       identity: { authType: "chatgpt", email: "user@example.com", plan: "pro" },
-      resetCreditsAvailable: 2,
+      resetCredits: {
+        availableCount: 2,
+        credits: [{
+          id: "reset-credit-one",
+          resetType: "codexRateLimits",
+          status: "available",
+          grantedAt: "2027-01-15T08:00:00.000Z",
+          expiresAt: "2027-01-18T08:00:00.000Z",
+          title: "Banked reset",
+          description: "Restores the Codex rate limit.",
+        }],
+      },
       activity: {
         lifetimeTokens: 1234,
         longestRunningTurnSeconds: 42,
