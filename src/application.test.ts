@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -405,6 +405,22 @@ describe("ProviderPulseApplication", () => {
 });
 
 describe("runtime validation", () => {
+  it("requires an owner-only Antigravity home separate from the operator's home", async () => {
+    const config = await testConfig();
+    const home = await mkdtemp(join(tmpdir(), "provider-pulse-antigravity-runtime-"));
+    const surface = { id: "agy-main", kind: "native-antigravity", home, executable: process.execPath } as const;
+    try {
+      config.credentialSurfaces = [surface];
+      await expect(validateRuntimeDependencies(config)).resolves.toBeUndefined();
+      await chmod(home, 0o755);
+      await expect(validateRuntimeDependencies(config)).rejects.toMatchObject({ code: "credential_home_not_isolated" });
+      await chmod(home, 0o700);
+      await expect(validateRuntimeDependencies(config, { environment: { HOME: home } })).rejects.toMatchObject({ code: "credential_home_not_isolated" });
+    } finally {
+      await rm(home, { recursive: true });
+    }
+  });
+
   it("accepts an executable resolved from PATH and existing credential home", async () => {
     const config = await testConfig();
     const root = await mkdtemp(join(tmpdir(), "provider-pulse-runtime-"));

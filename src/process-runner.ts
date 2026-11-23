@@ -6,6 +6,8 @@ export interface ProcessSpec {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   stdin?: string;
+  /** Stop if a single output stream contains this text, even across chunks. */
+  abortOnOutput?: string;
   timeoutMs: number;
   outputLimitBytes?: number;
   terminationGraceMs?: number;
@@ -24,6 +26,7 @@ export type ProcessErrorCode =
   | "process_spawn_failed"
   | "process_timeout"
   | "process_output_limit"
+  | "process_output_stop"
   | "process_aborted";
 
 export class ProcessRunError extends Error {
@@ -64,6 +67,9 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    const stop = spec.abortOnOutput ? Buffer.from(spec.abortOnOutput) : undefined;
+    let stdoutTail: Buffer | undefined;
+    let stderrTail: Buffer | undefined;
     let outputBytes = 0;
     let settled = false;
     let forcedKillTimer: NodeJS.Timeout | undefined;
@@ -96,6 +102,17 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
         return;
       }
       destination.push(buffer);
+      if (stop !== undefined) {
+        const tail = destination === stdout ? stdoutTail : stderrTail;
+        const text = tail === undefined ? buffer : Buffer.concat([tail, buffer]);
+        if (text.includes(stop)) {
+          finishError(new ProcessRunError("process_output_stop", "Process reached its output stop condition"));
+          return;
+        }
+        const nextTail = text.subarray(Math.max(0, text.length - stop.length + 1));
+        if (destination === stdout) stdoutTail = nextTail;
+        else stderrTail = nextTail;
+      }
     };
 
     const timeout = setTimeout(() => {

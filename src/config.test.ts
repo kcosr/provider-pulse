@@ -195,6 +195,41 @@ describe("parseConfig", () => {
     });
   });
 
+  it("accepts Antigravity for usage and rejects identity assertions and heartbeats", () => {
+    const config = validConfig();
+    const account = {
+      id: "antigravity-main",
+      label: "Antigravity Main",
+      provider: "antigravity",
+      usageSource: { adapter: "antigravity-cli", credentialSurfaceId: "agy-main" },
+    };
+    config.accounts = [account];
+    config.credentialSurfaces = [
+      { id: "agy-main", kind: "native-antigravity", home: "/tmp/agy-main", executable: "agy" },
+      { id: "pi-main", kind: "pi", home: "/tmp/pi-main", executable: "pi" },
+    ];
+    expect(parseConfig(config).accounts[0]).toEqual(account);
+
+    config.accounts = [{ ...account, expectedIdentity: { email: "person@example.com" } }];
+    expect(() => parseConfig(config)).toThrow(/does not report account identity/);
+
+    config.accounts = [account];
+    config.heartbeatJobs = [{
+      id: "agy-pi-heartbeat",
+      accountId: account.id,
+      credentialSurfaceId: "pi-main",
+      executor: "pi",
+      provider: "example",
+      model: "example",
+      reasoning: "low",
+      prompt: "Reply OK.",
+      trigger: { type: "after-reset", windowId: "gemini:weekly", offsetMinutes: 2 },
+      timeoutSeconds: 30,
+      enabled: true,
+    }];
+    expect(() => parseConfig(config)).toThrow(/Antigravity accounts do not support heartbeats/);
+  });
+
   it("requires a Fireworks account ID and matching API credential surface", () => {
     const config = validConfig();
     config.accounts = [{

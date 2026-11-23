@@ -5,7 +5,7 @@ subscription usage and keeping selected CLI credential surfaces active with
 minimal model heartbeats. It is independent of Harness: it never changes the
 credentials, sessions, targets, or rollout storage used by another app.
 
-Provider Pulse supports Codex, Claude, Grok, and structured Fireworks account
+Provider Pulse supports Codex, Claude, Grok, Antigravity, and structured Fireworks account
 and quota polling. See [the Fireworks integration notes](docs/fireworks-follow-up.md).
 
 ## What it does
@@ -36,7 +36,7 @@ file.
 - Node.js 22.12 or newer
 - tmux
 - The provider CLIs selected by the configuration (`codex`, `claude`, `grok`,
-  and/or `pi`)
+  `agy`, and/or `pi`)
 - A Fireworks API key when a `fireworks-api` usage surface is configured
 - Linux with `systemd --user` for the optional service setup
 
@@ -150,6 +150,24 @@ intentionally trust that separately provisioned surface without an identity
 assertion.
 
 ## Configuration model
+
+Antigravity uses the tab-separated `agy -p /usage` report introduced in `agy`
+1.1.11. Set `provider` to `antigravity`, the usage
+adapter to `antigravity-cli`, and the credential surface kind to
+`native-antigravity`. The surface's `home` is a separate, owner-only directory
+for this CLI process. Startup reports `credential_home_not_isolated` if this
+is the operator's regular home or if it allows group or other access. To sign
+in, use the dedicated directory as the child process home:
+
+```sh
+install -d -m 0700 "$HOME/.local/share/provider-pulse/homes/antigravity-main"
+env HOME="$HOME/.local/share/provider-pulse/homes/antigravity-main" agy acp --login
+```
+
+Use a separate sign-in for the Google account you intend to monitor. Omit
+`expectedIdentity` because the report has no account email, and leave the
+account out of `heartbeatJobs`. The adapter puts `gemini:weekly` first and
+includes the other reported quota meters. The CLI reports whole percentages.
 
 The top-level configuration defines:
 

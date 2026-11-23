@@ -77,6 +77,7 @@ const credentialSurfaceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("native-codex") }),
   z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("native-claude") }),
   z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("native-grok") }),
+  z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("native-antigravity") }),
   z.strictObject({ ...cliCredentialSurfaceBase, kind: z.literal("pi") }),
   z.strictObject({
     id: idSchema,
@@ -147,6 +148,7 @@ const configSchema = z
       "claude-tmux": { provider: "claude", surface: "native-claude" },
       "grok-tmux": { provider: "grok", surface: "native-grok" },
       "fireworks-api": { provider: "fireworks", surface: "fireworks-api" },
+      "antigravity-cli": { provider: "antigravity", surface: "native-antigravity" },
     } as const;
 
     config.accounts.forEach((account, index) => {
@@ -169,6 +171,9 @@ const configSchema = z
           "is required to select and verify a Fireworks account",
         );
       }
+      if (account.provider === "antigravity" && account.expectedIdentity !== undefined) {
+        addIssue(context, ["accounts", index, "expectedIdentity"], "Antigravity CLI usage does not report account identity");
+      }
     });
 
     config.heartbeatJobs.forEach((job, index) => {
@@ -181,6 +186,8 @@ const configSchema = z
           ["heartbeatJobs", index, "accountId"],
           "Fireworks accounts do not support heartbeats",
         );
+      } else if (account.provider === "antigravity") {
+        addIssue(context, ["heartbeatJobs", index, "accountId"], "Antigravity accounts do not support heartbeats");
       } else if (account.usageSource.hiddenWindowIds?.includes(job.trigger.windowId) === true) {
         addIssue(
           context,

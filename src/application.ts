@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, stat } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
+import { access, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 
 import { executeHeartbeat as executeConfiguredHeartbeat } from "./heartbeats.js";
 import type { JsonlLogger } from "./log.js";
 import { runProcess } from "./process-runner.js";
+import { probeAntigravityUsage } from "./providers/antigravity.js";
 import { ClaudeUsageAdapter } from "./providers/claude.js";
 import { probeCodexUsage } from "./providers/codex.js";
 import { probeFireworksUsage } from "./providers/fireworks.js";
@@ -88,6 +90,7 @@ export async function validateRuntimeDependencies(
   options: RuntimeValidationOptions = {},
 ): Promise<void> {
   const environment = options.environment ?? process.env;
+  const operatorHome = environment.HOME ?? homedir();
   for (const surface of config.credentialSurfaces) {
     if (surface.kind === "fireworks-api") {
       try {
@@ -116,7 +119,13 @@ export async function validateRuntimeDependencies(
     try {
       const home = await stat(surface.home);
       if (!home.isDirectory()) throw new Error("not a directory");
-    } catch {
+      if (surface.kind === "native-antigravity" &&
+          ((home.mode & 0o077) !== 0 ||
+            await realpath(surface.home) === await realpath(operatorHome).catch(() => resolve(operatorHome)))) {
+        throw new RuntimeDependencyError(surface.id, "credential_home_not_isolated", "Antigravity requires a dedicated, owner-only home");
+      }
+    } catch (error) {
+      if (error instanceof RuntimeDependencyError) throw error;
       throw new RuntimeDependencyError(surface.id, "credential_home_invalid", "Credential home is unavailable or is not a directory");
     }
     if (await resolveExecutable(surface.executable, environment) === null) {
@@ -1112,6 +1121,11 @@ function createDefaultUsageRuntime(probeDirectory: string): DefaultUsageRuntime 
           implementationVersion: String(value.adapterVersion),
         };
       }
+      case "antigravity-cli": {
+        if (surface.kind !== "native-antigravity") throw invalidUsageSurface(account.id);
+        const { snapshot, cliVersion } = await probeAntigravityUsage({ executable: surface.executable, home: surface.home, probeDirectory });
+        return { identity: {}, snapshot, implementation: "antigravity-cli", implementationVersion: cliVersion };
+      }
     }
   };
   return { probe, cleanup: () => terminal.shutdown() };
@@ -1362,6 +1376,7 @@ export class RuntimeDependencyError extends Error {
     | "credential_file_invalid"
     | "credential_file_permissions_invalid"
     | "credential_home_invalid"
+    | "credential_home_not_isolated"
     | "executable_unavailable"
     | "pi_model_unavailable";
 
