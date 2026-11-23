@@ -34,4 +34,13 @@ describe("runProcess", () => {
       }),
     ).rejects.toMatchObject({ code: "process_timeout" } satisfies Partial<ProcessRunError>);
   });
+
+  it("stops an interactive prompt split across output chunks", async () => {
+    await expect(runProcess({
+      executable: process.execPath,
+      args: ["-e", "process.stdout.write('Authentication '); setTimeout(() => process.stdout.write('required'), 20); setInterval(() => {}, 1000)"],
+      timeoutMs: 2_000,
+      abortOnOutput: "Authentication required",
+    })).rejects.toMatchObject({ code: "process_output_stop" });
+  });
 });

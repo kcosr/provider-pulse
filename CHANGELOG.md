@@ -7,6 +7,8 @@ All notable changes to Provider Pulse are documented here. The project follows
 
 ### Added
 
+- Monitor Antigravity quotas through `agy`, with Gemini weekly first and the
+  other reported weekly and five-hour meters available on the account card.
 - Codex status now includes banked reset-credit counts and available detail
   records from the structured app-server API without redeeming them.
 - Accounts can hide exact normalized usage-window IDs through strict operator

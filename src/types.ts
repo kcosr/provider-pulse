@@ -1,4 +1,4 @@
-export const PROVIDERS = ["codex", "claude", "grok", "fireworks"] as const;
+export const PROVIDERS = ["codex", "claude", "grok", "fireworks", "antigravity"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 export const HEARTBEAT_EXECUTORS = [
@@ -9,10 +9,8 @@ export const HEARTBEAT_EXECUTORS = [
 ] as const;
 export type HeartbeatExecutor = (typeof HEARTBEAT_EXECUTORS)[number];
 
-export const CREDENTIAL_SURFACE_KINDS = [
-  ...HEARTBEAT_EXECUTORS,
-  "fireworks-api",
-] as const;
+const CLI_CREDENTIAL_SURFACE_KINDS = [...HEARTBEAT_EXECUTORS, "native-antigravity"] as const;
+export const CREDENTIAL_SURFACE_KINDS = [...CLI_CREDENTIAL_SURFACE_KINDS, "fireworks-api"] as const;
 export type CredentialSurfaceKind = (typeof CREDENTIAL_SURFACE_KINDS)[number];
 
 export const USAGE_ADAPTERS = [
@@ -20,6 +18,7 @@ export const USAGE_ADAPTERS = [
   "claude-tmux",
   "grok-tmux",
   "fireworks-api",
+  "antigravity-cli",
 ] as const;
 export type UsageAdapter = (typeof USAGE_ADAPTERS)[number];
 
@@ -60,7 +59,7 @@ export interface AccountConfig {
 
 export interface CliCredentialSurfaceConfig {
   id: string;
-  kind: HeartbeatExecutor;
+  kind: (typeof CLI_CREDENTIAL_SURFACE_KINDS)[number];
   home: string;
   executable: string;
 }

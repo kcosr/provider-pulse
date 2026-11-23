@@ -105,7 +105,7 @@
 
   function providerPresentation(provider) {
     const normalized = String(provider || "provider").toLowerCase();
-    const labels = { codex: "Codex", claude: "Claude", grok: "Grok", fireworks: "Fireworks" };
+    const labels = { codex: "Codex", claude: "Claude", grok: "Grok", fireworks: "Fireworks", antigravity: "Antigravity" };
     return {
       className: normalized.replace(/[^a-z0-9-]/g, ""),
       initial: (labels[normalized] || normalized).slice(0, 1).toUpperCase() || "P",
